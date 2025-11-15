@@ -1,0 +1,184 @@
+package com.v2ray.ang
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.net.VpnService
+import android.os.Build
+import android.os.Bundle
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ProgressBar
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
+import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
+import com.v2ray.ang.data.UpdateInfo // <-- اصلاح ۱: وارد کردن کلاس صحیح
+import com.v2ray.ang.ui.MainActivity
+import com.v2ray.ang.viewmodel.PreCheckEvent
+import com.v2ray.ang.viewmodel.PreCheckViewModel
+
+class PreCheckActivity : AppCompatActivity() {
+
+    private val viewModel: PreCheckViewModel by viewModels()
+
+    private lateinit var edtUsername: EditText
+    private lateinit var edtPassword: EditText
+    private lateinit var btnLogin: Button
+    private lateinit var btnClear: Button
+    private lateinit var txtStatus: TextView
+    private lateinit var txtLocalIp: TextView
+    private lateinit var progressCheckNetwork: ProgressBar
+    private lateinit var progressLogin: ProgressBar
+    private lateinit var loginContainer: android.view.View
+
+    private val requestVpnPermission =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.resultCode == RESULT_OK) viewModel.onVpnPermissionGranted() else viewModel.onVpnPermissionDenied()
+        }
+
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) viewModel.onNotificationPermissionGranted() else viewModel.onNotificationPermissionDenied()
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_precheck)
+        setupViews()
+        setupListeners()
+        observeViewModel()
+    }
+
+    private fun setupViews() {
+        val toolbar: Toolbar = findViewById(R.id.toolbar)
+        setSupportActionBar(toolbar)
+        supportActionBar?.title = "Login"
+        edtUsername = findViewById(R.id.edtUsername)
+        edtPassword = findViewById(R.id.edtPassword)
+        btnLogin = findViewById(R.id.btnLogin)
+        btnClear = findViewById(R.id.btnClear)
+        txtStatus = findViewById(R.id.txtStatus)
+        txtLocalIp = findViewById(R.id.txtLocalIp)
+        progressCheckNetwork = findViewById(R.id.progressCheckNetwork)
+        progressLogin = findViewById(R.id.progressLogin)
+        loginContainer = findViewById(R.id.loginContainer)
+    }
+
+    private fun setupListeners() {
+        btnLogin.setOnClickListener {
+            viewModel.authenticate(
+                edtUsername.text.toString(),
+                edtPassword.text.toString()
+            )
+        }
+        btnClear.setOnClickListener { viewModel.clearCredentials() }
+    }
+
+    private fun observeViewModel() {
+        viewModel.uiState.observe(this) { state ->
+            progressCheckNetwork.isVisible = state.isNetworkCheckInProgress
+            progressLogin.isVisible = state.isLoginInProgress
+            loginContainer.isVisible = state.isLoginContainerVisible
+
+            val loginEnabled = !state.isLoginInProgress
+            btnLogin.isEnabled = loginEnabled
+            btnClear.isEnabled = loginEnabled
+            edtUsername.isEnabled = loginEnabled
+            edtPassword.isEnabled = loginEnabled
+
+            txtStatus.text = state.statusMessage
+            txtLocalIp.text = state.localIp
+        }
+
+        viewModel.events.observe(this) { event ->
+            event.getContentIfNotHandled()?.let { eventContent ->
+                when (eventContent) {
+                    is PreCheckEvent.AuthenticationSuccess -> checkPermissionsAndProceed()
+                    is PreCheckEvent.RequestVpnPermission -> checkAndRequestVpnPermission()
+                    is PreCheckEvent.NavigateToMain -> navigateToMainActivity()
+                    is PreCheckEvent.ClearFields -> {
+                        edtUsername.text.clear()
+                        edtPassword.text.clear()
+                    }
+                    is PreCheckEvent.ShowToast -> {
+                        Toast.makeText(this, eventContent.message, Toast.LENGTH_SHORT).show()
+                    }
+                    is PreCheckEvent.ShowUpdateDialog -> showUpdateDialog(eventContent.updateInfo) // <-- اصلاح ۳: استفاده از نام متغیر صحیح
+                }
+            }
+        }
+    }
+
+    private fun showUpdateDialog(info: UpdateInfo) { // <-- اصلاح ۲: تغییر نوع پارامتر
+        // جلوگیری از نمایش مجدد دیالوگ در صورت چرخش صفحه یا بازسازی اکتیویتی
+        if (isFinishing || isDestroyed) {
+            return
+        }
+
+        val dialogBuilder = AlertDialog.Builder(this)
+            .setTitle("New Version Available (${info.versionName})")
+            .setPositiveButton("Download") { dialog, _ ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.updateUrl))
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    // اگر برنامه‌ای برای باز کردن لینک وجود نداشت
+                    Toast.makeText(this, "Could not open the link.", Toast.LENGTH_SHORT).show()
+                }
+                dialog.dismiss()
+                if (info.isForced) {
+                    finish() // بستن برنامه اگر آپدیت اجباری است
+                }
+            }
+
+        if (info.isForced) {
+            dialogBuilder
+                .setCancelable(false)
+                .setMessage("A mandatory update is required to continue using the app.\n\nRecent Changes:\n${info.releaseNotes}")
+        } else {
+            dialogBuilder
+                .setMessage("A new version of the app is available.\n\nRecent Changes:\n${info.releaseNotes}")
+                .setNegativeButton("Later") { dialog, _ ->
+                    dialog.dismiss()
+                }
+        }
+        dialogBuilder.create().show()
+    }
+
+    private fun checkPermissionsAndProceed() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            txtStatus.text = "Requesting notification permission..."
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            checkAndRequestVpnPermission()
+        }
+    }
+
+    private fun checkAndRequestVpnPermission() {
+        txtStatus.text = "Checking VPN permission..."
+        val vpnIntent = VpnService.prepare(this)
+        if (vpnIntent != null) {
+            requestVpnPermission.launch(vpnIntent)
+        } else {
+            viewModel.onVpnPermissionGranted()
+        }
+    }
+
+    private fun navigateToMainActivity() {
+        txtStatus.text = "Permissions granted. Redirecting..."
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("AUTO_CONNECT_RADIUS", true)
+        }
+        startActivity(intent)
+        finish()
+    }
+}

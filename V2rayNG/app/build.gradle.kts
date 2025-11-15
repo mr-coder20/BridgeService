@@ -12,8 +12,8 @@ android {
         applicationId = "com.v2ray.ang"
         minSdk = 21
         targetSdk = 35
-        versionCode = 678
-        versionName = "1.10.27"
+        versionCode = 100 // <--- نسخه پایه و واضح برنامه شما
+        versionName = "1.0.0"
         multiDexEnabled = true
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
@@ -50,10 +50,10 @@ android {
 
     flavorDimensions.add("distribution")
     productFlavors {
-        create("fdroid") {
+        create("bridge") {
             dimension = "distribution"
-            applicationIdSuffix = ".fdroid"
-            buildConfigField("String", "DISTRIBUTION", "\"F-Droid\"")
+            applicationIdSuffix = ".bridge"
+            buildConfigField("String", "DISTRIBUTION", "\"\"")
         }
         create("playstore") {
             dimension = "distribution"
@@ -77,49 +77,59 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
-    applicationVariants.all {
-        val variant = this
-        val isFdroid = variant.productFlavors.any { it.name == "fdroid" }
-        if (isFdroid) {
-            val versionCodes =
-                mapOf(
-                    "armeabi-v7a" to 2, "arm64-v8a" to 1, "x86" to 4, "x86_64" to 3, "universal" to 0
-                )
-
-            variant.outputs
-                .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
-                .forEach { output ->
-                    val abi = output.getFilter("ABI") ?: "universal"
-                    output.outputFileName = "v2rayNG_${variant.versionName}-fdroid_${abi}.apk"
-                    if (versionCodes.containsKey(abi)) {
-                        output.versionCodeOverride =
-                            (100 * variant.versionCode + versionCodes[abi]!!).plus(5000000)
-                    } else {
-                        return@forEach
-                    }
-                }
-        } else {
-            val versionCodes =
-                mapOf("armeabi-v7a" to 4, "arm64-v8a" to 4, "x86" to 4, "x86_64" to 4, "universal" to 4)
-
-            variant.outputs
-                .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
-                .forEach { output ->
-                    val abi = if (output.getFilter("ABI") != null)
-                        output.getFilter("ABI")
-                    else
-                        "universal"
-
-                    output.outputFileName = "v2rayNG_${variant.versionName}_${abi}.apk"
-                    if (versionCodes.containsKey(abi)) {
-                        output.versionCodeOverride =
-                            (1000000 * versionCodes[abi]!!).plus(variant.versionCode)
-                    } else {
-                        return@forEach
-                    }
-                }
-        }
-    }
+//    applicationVariants.all {
+//        val variant = this
+//        val isbridge = variant.productFlavors.any { it.name == "bridge" }
+//        if (isbridge) {
+//            val versionCodes =
+//                mapOf(
+//                    "armeabi-v7a" to 2,
+//                    "arm64-v8a" to 1,
+//                    "x86" to 4,
+//                    "x86_64" to 3,
+//                    "universal" to 0
+//                )
+//
+//            variant.outputs
+//                .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
+//                .forEach { output ->
+//                    val abi = output.getFilter("ABI") ?: "universal"
+//                    output.outputFileName = "Try Free Connect_${variant.versionName}${abi}.apk"
+//                    if (versionCodes.containsKey(abi)) {
+//                        output.versionCodeOverride =
+//                            (100 * variant.versionCode + versionCodes[abi]!!).plus(5000000)
+//                    } else {
+//                        return@forEach
+//                    }
+//                }
+//        } else {
+//            val versionCodes =
+//                mapOf(
+//                    "armeabi-v7a" to 4,
+//                    "arm64-v8a" to 4,
+//                    "x86" to 4,
+//                    "x86_64" to 4,
+//                    "universal" to 4
+//                )
+//
+//            variant.outputs
+//                .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
+//                .forEach { output ->
+//                    val abi = if (output.getFilter("ABI") != null)
+//                        output.getFilter("ABI")
+//                    else
+//                        "universal"
+//
+//                    output.outputFileName = "Try Free Connect_${variant.versionName}_${abi}.apk"
+//                    if (versionCodes.containsKey(abi)) {
+//                        output.versionCodeOverride =
+//                            (1000000 * versionCodes[abi]!!).plus(variant.versionCode)
+//                    } else {
+//                        return@forEach
+//                    }
+//                }
+//        }
+//    }
 
     buildFeatures {
         viewBinding = true
@@ -188,4 +198,10 @@ dependencies {
     testImplementation(libs.org.mockito.mockito.inline)
     testImplementation(libs.mockito.kotlin)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
+
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // JSch برای SSH
+    implementation("com.jcraft:jsch:0.1.55")
 }

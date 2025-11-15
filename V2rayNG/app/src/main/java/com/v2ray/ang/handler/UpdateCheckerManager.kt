@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.v2ray.ang.AppConfig
-import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.dto.CheckUpdateResult
 import com.v2ray.ang.dto.GitHubRelease
 import com.v2ray.ang.extension.concatUrl
@@ -14,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import com.v2ray.ang.BuildConfig
 
 object UpdateCheckerManager {
     suspend fun checkForUpdate(includePreRelease: Boolean = false): CheckUpdateResult = withContext(Dispatchers.IO) {

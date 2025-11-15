@@ -129,7 +129,11 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
         setContentView(binding.root)
         title = getString(R.string.title_server)
         setSupportActionBar(binding.toolbar)
-
+        if (intent.getBooleanExtra("AUTO_CONNECT_RADIUS", false)) {
+            // برای جلوگیری از اجرای دوباره این کد، فلگ را پاک می‌کنیم
+            intent.removeExtra("AUTO_CONNECT_RADIUS")
+            autoConnectRadiusConfig()
+        }
         binding.fab.setOnClickListener {
             if (mainViewModel.isRunning.value == true) {
                 V2RayServiceManager.stopVService(this)
@@ -700,4 +704,69 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
         binding.drawerLayout.closeDrawer(GravityCompat.START)
         return true
     }
+    // این تابع را به انتهای کلاس MainActivity اضافه کنید
+    // این تابع را در MainActivity.kt پیدا کرده و با کد زیر جایگزین کنید
+    private fun autoConnectRadiusConfig() {
+        // اگر سرویس در حال اجراست، کاری انجام نده
+        if (mainViewModel.isRunning.value == true) {
+            toast("Already connected")
+            return
+        }
+
+        // نمایش لودینگ
+        binding.pbWaiting.show()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // ==================>>>>> تغییر اصلی اینجاست <<<<<==================
+                // 1. ابتدا تمام کانفیگ‌های موجود را پاک کن
+                mainViewModel.removeAllServer()
+                // =================================================================
+
+                val configString = """
+
+            """.trimIndent()
+
+                // 2. کانفیگ جدید را با قابلیت بازنویسی اضافه کن
+                val (count, _) = AngConfigManager.importBatchConfig(configString, mainViewModel.subscriptionId, true)
+
+                if (count > 0) {
+                    // 3. لیست سرورها را در ترد اصلی به‌روز کن
+                    withContext(Dispatchers.Main) {
+                        mainViewModel.reloadServerList()
+                    }
+                    // یک وقفه کوتاه برای اطمینان از اینکه لیست در ViewModel به‌روز شده
+                    delay(100)
+
+                    // 4. آخرین پروفایل اضافه شده (که تنها پروفایل موجود است) را انتخاب کن
+                    val newProfile = mainViewModel.serversCache.firstOrNull() // چون لیست خالی شده، firstOrNull همان lastOrNull است
+                    if (newProfile != null) {
+                        MmkvManager.setSelectServer(newProfile.guid)
+
+                        // 5. سرویس را در ترد اصلی استارت بزن
+                        withContext(Dispatchers.Main) {
+                            startV2Ray()
+                            toast(R.string.toast_success)
+                        }
+                    } else {
+                        throw Exception("Could not find the imported profile after reloading.")
+                    }
+                } else {
+                    throw Exception("Failed to import custom config.")
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    toast("خطا در اتصال خودکار: ${e.message}")
+                }
+                Log.e(AppConfig.TAG, "autoConnectRadiusConfig failed", e)
+            } finally {
+                // در نهایت، لودینگ را در ترد اصلی مخفی کن
+                withContext(Dispatchers.Main) {
+                    binding.pbWaiting.hide()
+                }
+            }
+        }
+    }
+
+
 }

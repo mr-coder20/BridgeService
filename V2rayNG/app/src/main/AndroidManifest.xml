@@ -27,7 +27,7 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
-    <!-- https://developer.android.com/about/versions/11/privacy/package-visibility -->
+    <!-- Permissions -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -40,7 +40,6 @@
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
         android:minSdkVersion="34" />
-    <!-- <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" /> -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -48,86 +47,63 @@
     <application
         android:name=".AngApplication"
         android:allowBackup="true"
-        android:banner="@mipmap/ic_banner"
+        android:banner="@mipmap/ic_launcher"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
-        android:theme="@style/AppThemeDayNight"
-        android:usesCleartextTraffic="true"
+        android:theme="@style/AppThemeDayNight.NoActionBar"        android:usesCleartextTraffic="false"
         tools:targetApi="m">
 
+        <!-- =================== PreCheckActivity =================== -->
+        <activity
+            android:name=".PreCheckActivity"
+            android:exported="true"
+            android:theme="@style/AppThemeDayNight.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- اگر می‌خواهید روی Android TV هم نمایش داده شود، این خط را اضافه کنید -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- =================== MainActivity (دیگر ورودی برنامه نیست) =================== -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/AppThemeDayNight.NoActionBar">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
-            </intent-filter>
+            <!-- intent-filter لانچر از اینجا حذف شد -->
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
             </intent-filter>
-
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
-        <activity
-            android:name=".ui.ServerActivity"
-            android:exported="false"
-            android:windowSoftInputMode="stateUnchanged" />
-        <activity
-            android:name=".ui.ServerCustomConfigActivity"
-            android:exported="false"
-            android:windowSoftInputMode="stateUnchanged" />
-        <activity
-            android:name=".ui.SettingsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.PerAppProxyActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.ScannerActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.LogcatActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.RoutingSettingActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.RoutingEditActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.SubSettingActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.UserAssetActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.UserAssetUrlActivity"
-            android:exported="false" />
 
-        <activity
-            android:name=".ui.SubEditActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.ScScannerActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.ScSwitchActivity"
+
+        <!-- =================== Other Activities =================== -->
+        <activity android:name=".ui.ServerActivity" android:exported="false" android:windowSoftInputMode="stateUnchanged" />
+        <activity android:name=".ui.ServerCustomConfigActivity" android:exported="false" android:windowSoftInputMode="stateUnchanged" />
+        <activity android:name=".ui.SettingsActivity" android:exported="false" />
+        <activity android:name=".ui.PerAppProxyActivity" android:exported="false" />
+        <activity android:name=".ui.ScannerActivity" android:exported="false" />
+        <activity android:name=".ui.LogcatActivity" android:exported="false" />
+        <activity android:name=".ui.RoutingSettingActivity" android:exported="false" />
+        <activity android:name=".ui.RoutingEditActivity" android:exported="false" />
+        <activity android:name=".ui.SubSettingActivity" android:exported="false" />
+        <activity android:name=".ui.UserAssetActivity" android:exported="false" />
+        <activity android:name=".ui.UserAssetUrlActivity" android:exported="false" />
+        <activity android:name=".ui.SubEditActivity" android:exported="false" />
+        <activity android:name=".ui.ScScannerActivity" android:exported="false" />
+        <activity android:name=".ui.ScSwitchActivity"
             android:excludeFromRecents="true"
             android:exported="false"
             android:process=":RunSoLibV2RayDaemon"
             android:theme="@style/AppTheme.NoActionBar.Translucent" />
-
-        <activity
-            android:name=".ui.UrlSchemeActivity"
-            android:exported="true">
+        <activity android:name=".ui.UrlSchemeActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -135,22 +111,22 @@
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.BROWSABLE" />
                 <category android:name="android.intent.category.DEFAULT" />
-
                 <data android:scheme="v2rayng" />
                 <data android:host="install-config" />
                 <data android:host="install-sub" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".ui.CheckUpdateActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ui.AboutActivity"
-            android:exported="false" />
+        <activity android:name=".ui.CheckUpdateActivity" android:exported="false" />
+        <activity android:name=".ui.AboutActivity" android:exported="false" />
+        <activity android:name=".ui.TaskerActivity" android:exported="true" android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="com.twofortyfouram.locale.intent.action.EDIT_SETTING" />
+            </intent-filter>
+        </activity>
 
+        <!-- =================== Services =================== -->
         <service
             android:name=".service.V2RayVpnService"
             android:enabled="true"
@@ -186,28 +162,6 @@
             android:exported="false"
             android:process=":RunSoLibV2RayDaemon" />
 
-        <receiver
-            android:name=".receiver.WidgetProvider"
-            android:exported="true"
-            android:process=":RunSoLibV2RayDaemon">
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/app_widget_provider" />
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="${applicationId}.action.widget.click" />
-                <action android:name="${applicationId}.action.activity" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".receiver.BootReceiver"
-            android:exported="true"
-            android:label="BootReceiver">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
-
         <service
             android:name=".service.QSTileService"
             android:exported="true"
@@ -224,18 +178,30 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="tile" />
         </service>
-        <!-- =====================Tasker===================== -->
-        <activity
-            android:name=".ui.TaskerActivity"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher">
-            <intent-filter>
-                <action android:name="com.twofortyfouram.locale.intent.action.EDIT_SETTING" />
-            </intent-filter>
-        </activity>
 
-        <receiver
-            android:name=".receiver.TaskerReceiver"
+        <!-- =================== Receivers =================== -->
+        <receiver android:name=".receiver.WidgetProvider"
+            android:exported="true"
+            android:process=":RunSoLibV2RayDaemon">
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/app_widget_provider" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="${applicationId}.action.widget.click" />
+                <action android:name="${applicationId}.action.activity" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".receiver.BootReceiver"
+            android:exported="true"
+            android:label="BootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".receiver.TaskerReceiver"
             android:exported="true"
             android:process=":RunSoLibV2RayDaemon"
             tools:ignore="ExportedReceiver">
@@ -243,18 +209,17 @@
                 <action android:name="com.twofortyfouram.locale.intent.action.FIRE_SETTING" />
             </intent-filter>
         </receiver>
-        <!-- =====================Tasker===================== -->
+
+        <!-- =================== Providers =================== -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
             tools:node="merge">
-
             <meta-data
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
-
         </provider>
 
         <provider
