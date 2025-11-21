@@ -117,33 +117,43 @@ class MikroTikRepository {
         return withContext(Dispatchers.IO) {
             try {
                 val gistUrl = "https://gist.githubusercontent.com/mr-coder20/33e88c9783202c52b7654886b2619147/raw"
+
+                // 1. اضافه کردن پارامتر زمان برای فریب دادن کش سرور/کلاینت
                 val urlString = "$gistUrl?t=${System.currentTimeMillis()}"
+
                 val url = URL(urlString)
-
                 val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
 
+                // 2. تنظیم هدرهای اجباری برای جلوگیری از کش
+                connection.requestMethod = "GET"
                 connection.useCaches = false
+                connection.defaultUseCaches = false
                 connection.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
                 connection.setRequestProperty("Pragma", "no-cache")
                 connection.setRequestProperty("Expires", "0")
 
-                connection.connectTimeout = 15000
-                connection.readTimeout = 15000
+                connection.connectTimeout = 10000
+                connection.readTimeout = 10000
 
                 if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                     val text = connection.inputStream.bufferedReader().use { it.readText() }
-                    Log.d("UpdateCheck", "Raw JSON received from Gist: $text")
-                    Gson().fromJson(text, UpdateConfig::class.java)
+                    Log.d("UpdateCheck", "JSON Downloaded: $text")
+                    try {
+                        Gson().fromJson(text, UpdateConfig::class.java)
+                    } catch (e: Exception) {
+                        Log.e("UpdateCheck", "JSON Parsing Error: ${e.message}")
+                        null
+                    }
                 } else {
-                    Log.e("UpdateCheck", "Failed to fetch update config from Gist. Response code: ${connection.responseCode}, Message: ${connection.responseMessage}")
+                    Log.e("UpdateCheck", "Connection Failed: ${connection.responseCode}")
                     null
                 }
             } catch (e: Exception) {
-                Log.e("UpdateCheck", "Exception while fetching update config from Gist", e)
-                e.printStackTrace()
+                Log.e("UpdateCheck", "Update Check Exception: ${e.message}")
                 null
             }
         }
     }
+
+
 }

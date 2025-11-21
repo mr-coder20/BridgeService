@@ -116,41 +116,53 @@ class PreCheckActivity : AppCompatActivity() {
         }
     }
 
-    private fun showUpdateDialog(info: UpdateInfo) { // <-- اصلاح ۲: تغییر نوع پارامتر
-        // جلوگیری از نمایش مجدد دیالوگ در صورت چرخش صفحه یا بازسازی اکتیویتی
-        if (isFinishing || isDestroyed) {
-            return
-        }
+    private fun showUpdateDialog(info: UpdateInfo) {
+        // جلوگیری از کرش در صورت بسته بودن اکتیویتی
+        if (isFinishing || isDestroyed) return
 
-        val dialogBuilder = AlertDialog.Builder(this)
+        val builder = AlertDialog.Builder(this)
             .setTitle("New Version Available (${info.versionName})")
-            .setPositiveButton("Download") { dialog, _ ->
-                try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.updateUrl))
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    // اگر برنامه‌ای برای باز کردن لینک وجود نداشت
-                    Toast.makeText(this, "Could not open the link.", Toast.LENGTH_SHORT).show()
-                }
-                dialog.dismiss()
+            .setMessage(info.releaseNotes)
+            .setCancelable(false) // جلوگیری از بستن با کلیک بیرون دیالوگ
+
+        // دکمه دانلود برای هر دو حالت مشترک است
+        builder.setPositiveButton("Download") { _, _ ->
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.updateUrl))
+                startActivity(intent)
+                // اگر اجباری باشد، بعد از زدن دانلود هم برنامه را می‌بندیم تا کاربر تا آپدیت نکند نتواند استفاده کند
                 if (info.isForced) {
-                    finish() // بستن برنامه اگر آپدیت اجباری است
+                    finishAffinity()
                 }
+            } catch (e: Exception) {
+                Toast.makeText(this, "Could not open link.", Toast.LENGTH_SHORT).show()
             }
+        }
 
         if (info.isForced) {
-            dialogBuilder
-                .setCancelable(false)
-                .setMessage("A mandatory update is required to continue using the app.\n\nRecent Changes:\n${info.releaseNotes}")
+            // --- حالت اجباری ---
+            builder.setTitle("Update Required (${info.versionName})")
+            builder.setMessage("A mandatory update is required to continue.\n\nChanges:\n${info.releaseNotes}")
+
+            // دکمه خروج کامل از برنامه
+            builder.setNegativeButton("Exit App") { dialog, _ ->
+                dialog.dismiss()
+                finishAffinity() // بستن کامل برنامه و همه اکتیویتی‌ها
+            }
         } else {
-            dialogBuilder
-                .setMessage("A new version of the app is available.\n\nRecent Changes:\n${info.releaseNotes}")
-                .setNegativeButton("Later") { dialog, _ ->
-                    dialog.dismiss()
-                }
+            // --- حالت اختیاری ---
+            builder.setMessage("A new version is available.\n\nChanges:\n${info.releaseNotes}")
+
+            // دکمه ادامه دادن بدون آپدیت
+            builder.setNegativeButton("Continue / Later") { dialog, _ ->
+                dialog.dismiss()
+                // کاربر می‌تواند با فرم لاگین کار کند
+            }
         }
-        dialogBuilder.create().show()
+
+        builder.create().show()
     }
+
 
     private fun checkPermissionsAndProceed() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

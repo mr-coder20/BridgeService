@@ -27,40 +27,41 @@ class PreCheckViewModel : ViewModel() {
 
     private fun startInitialChecks() {
         viewModelScope.launch {
+            // 1. شروع بررسی اینترنت
             _uiState.value = PreCheckUiState(
                 isNetworkCheckInProgress = true,
                 statusMessage = "Checking Internet Connection..."
             )
+
             val networkStatus = repository.checkInternetConnectivity()
             _uiState.value = _uiState.value?.copy(localIp = "Local IP: ${networkStatus.localIp ?: "—"}")
 
             if (!networkStatus.isReachable) {
                 _uiState.value = _uiState.value?.copy(
                     isNetworkCheckInProgress = false,
-                    statusMessage = "Internet connection failed. Please check your network and restart the app."
+                    statusMessage = "Internet connection failed."
                 )
                 return@launch
             }
 
+            // 2. شروع بررسی آپدیت
             _uiState.value = _uiState.value?.copy(statusMessage = "Checking for updates...")
             val config = repository.checkForUpdates()
 
-            // =================================================================
-            // ==     مهم: اضافه کردن لاگ برای دیدن محتوای دریافت شده     ==
-            // =================================================================
-            if (config == null) {
-                Log.d("UpdateCheck", "Update config is NULL. No update dialog will be shown.")
-            } else {
-                Log.d("UpdateCheck", "Update config received: $config")
-            }
-            // =================================================================
+            // دریافت نسخه فعلی برنامه
+            // نکته: اگر در حالت Debug هستید ممکن است versionCode عدد 1 باشد. فایل build.gradle را چک کنید.
+            val currentVersionCode = BuildConfig.VERSION_CODE.toLong()
+
+            Log.d("UpdateCheck", "App Version: $currentVersionCode")
 
             if (config != null) {
-                val currentVersionCode = BuildConfig.VERSION_CODE.toLong()
-                Log.d("UpdateCheck", "Current app version code: $currentVersionCode") // لاگ نسخه فعلی
+                Log.d("UpdateCheck", "Remote Config -> Latest: ${config.latestVersionCode}, MinRequired: ${config.minRequiredVersionCode}")
 
+                // منطق اصلی آپدیت
                 if (currentVersionCode < config.minRequiredVersionCode) {
-                    Log.d("UpdateCheck", "Condition for FORCED update met.")
+                    // --- آپدیت اجباری ---
+                    Log.d("UpdateCheck", "Status: FORCED UPDATE REQUIRED")
+
                     _events.value = Event(PreCheckEvent.ShowUpdateDialog(
                         UpdateInfo(
                             isForced = true,
@@ -69,10 +70,18 @@ class PreCheckViewModel : ViewModel() {
                             updateUrl = config.updateUrl
                         )
                     ))
-                    _uiState.value = _uiState.value?.copy(isNetworkCheckInProgress = false)
-                    return@launch
+
+                    // در آپدیت اجباری، صفحه لاگین را نمایش نمی‌دهیم و پراگرس را متوقف می‌کنیم
+                    _uiState.value = _uiState.value?.copy(
+                        isNetworkCheckInProgress = false,
+                        statusMessage = "Update Required"
+                    )
+                    return@launch // خروج از تابع (کاربر حق ندارد ادامه دهد)
+
                 } else if (currentVersionCode < config.latestVersionCode) {
-                    Log.d("UpdateCheck", "Condition for OPTIONAL update met.")
+                    // --- آپدیت اختیاری ---
+                    Log.d("UpdateCheck", "Status: OPTIONAL UPDATE AVAILABLE")
+
                     _events.value = Event(PreCheckEvent.ShowUpdateDialog(
                         UpdateInfo(
                             isForced = false,
@@ -81,11 +90,15 @@ class PreCheckViewModel : ViewModel() {
                             updateUrl = config.updateUrl
                         )
                     ))
+                    // در آپدیت اختیاری، کد ادامه پیدا می‌کند تا صفحه لاگین زیر دیالوگ نمایش داده شود
                 } else {
-                    Log.d("UpdateCheck", "No update needed. Current version is up-to-date.")
+                    Log.d("UpdateCheck", "Status: NO UPDATE NEEDED")
                 }
+            } else {
+                Log.w("UpdateCheck", "Config was NULL. Skipping update check.")
             }
 
+            // 3. نمایش صفحه لاگین (اگر آپدیت اجباری نبود)
             _uiState.value = _uiState.value?.copy(
                 isNetworkCheckInProgress = false,
                 statusMessage = "Please enter your credentials.",
