@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import com.v2ray.ang.data.UpdateInfo // <-- اصلاح ۱: وارد کردن کلاس صحیح
 import com.v2ray.ang.ui.MainActivity
+import com.v2ray.ang.util.Event
 import com.v2ray.ang.viewmodel.PreCheckEvent
 import com.v2ray.ang.viewmodel.PreCheckViewModel
 
@@ -65,7 +66,6 @@ class PreCheckActivity : AppCompatActivity() {
         btnLogin = findViewById(R.id.btnLogin)
         btnClear = findViewById(R.id.btnClear)
         txtStatus = findViewById(R.id.txtStatus)
-        txtLocalIp = findViewById(R.id.txtLocalIp)
         progressCheckNetwork = findViewById(R.id.progressCheckNetwork)
         progressLogin = findViewById(R.id.progressLogin)
         loginContainer = findViewById(R.id.loginContainer)
@@ -74,6 +74,7 @@ class PreCheckActivity : AppCompatActivity() {
     private fun setupListeners() {
         btnLogin.setOnClickListener {
             viewModel.authenticate(
+                this, // <-- اصلاح: اضافه کردن context
                 edtUsername.text.toString(),
                 edtPassword.text.toString()
             )
@@ -94,7 +95,6 @@ class PreCheckActivity : AppCompatActivity() {
             edtPassword.isEnabled = loginEnabled
 
             txtStatus.text = state.statusMessage
-            txtLocalIp.text = state.localIp
         }
 
         viewModel.events.observe(this) { event ->

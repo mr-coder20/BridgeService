@@ -47,6 +47,7 @@
                 tools:visibility="visible" />
 
             <!-- کانتینر لاگین -->
+            <!-- کانتینر لاگین -->
             <androidx.cardview.widget.CardView
                 android:id="@+id/loginContainer"
                 android:layout_width="match_parent"
@@ -72,16 +73,28 @@
                         android:importantForAutofill="no"
                         android:singleLine="true" />
 
-                    <!-- فیلد رمز عبور -->
-                    <EditText
-                        android:id="@+id/edtPassword"
+                    <!-- فیلد رمز عبور با قابلیت مشاهده رمز (چشم) -->
+                    <!-- تغییرات: استفاده از TextInputLayout برای افزودن دکمه چشم -->
+                    <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:hint="Password"
-                        android:importantForAutofill="no"
-                        android:inputType="textPassword"
-                        android:singleLine="true" />
+                        app:endIconMode="password_toggle"
+                        app:hintEnabled="false">
+
+                        <!-- نکته: hintEnabled=false باعث می‌شود ظاهر شبیه EditText بالا بماند -->
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/edtPassword"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@null"
+                            android:hint="Password"
+                            android:importantForAutofill="no"
+                            android:inputType="textPassword"
+                            android:singleLine="true" />
+
+                    </com.google.android.material.textfield.TextInputLayout>
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -117,6 +130,7 @@
 
             <!-- بخش نمایش وضعیت -->
             <LinearLayout
+
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
@@ -124,6 +138,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:textSize="20sp"
                     android:id="@+id/txtStatus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -131,13 +146,7 @@
                     android:textAppearance="?attr/textAppearanceBodyMedium"
                     tools:text="Status: Checking for updates..." />
 
-                <TextView
-                    android:id="@+id/txtLocalIp"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textAppearance="?attr/textAppearanceBodySmall"
-                    tools:text="Local IP: 192.168.1.10" />
+
             </LinearLayout>
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

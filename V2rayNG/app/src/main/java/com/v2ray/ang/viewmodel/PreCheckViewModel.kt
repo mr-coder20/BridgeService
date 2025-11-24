@@ -1,5 +1,6 @@
 package com.v2ray.ang.viewmodel
 
+import android.content.Context
 import android.util.Log // <--- وارد کردن کلاس Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -108,15 +109,14 @@ class PreCheckViewModel : ViewModel() {
     }
 
     // ... بقیه توابع ViewModel بدون تغییر باقی می‌مانند ...
-    fun authenticate(user: String, pass: String) {
+    fun authenticate(context: Context, user: String, pass: String) {
         if (user.isBlank() || pass.isBlank()) {
             _uiState.value = _uiState.value?.copy(statusMessage = "Username and password cannot be empty.")
             return
         }
         viewModelScope.launch {
             _uiState.value = _uiState.value?.copy(isLoginInProgress = true, statusMessage = "Authenticating...")
-            val routerIp = repository.getMikrotikIp()
-            val result = repository.authenticateSSH(routerIp, user, pass)
+            val result = repository.authenticateWebView(context, user, pass)
             _uiState.value = _uiState.value?.copy(isLoginInProgress = false, statusMessage = result.message)
             if (result.success) {
                 _events.value = Event(PreCheckEvent.AuthenticationSuccess)

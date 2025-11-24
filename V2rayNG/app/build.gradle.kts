@@ -204,4 +204,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     // JSch برای SSH
     implementation("com.jcraft:jsch:0.1.55")
+
+    implementation("com.squareup.okhttp3:okhttp:5.3.2")
+
 }
