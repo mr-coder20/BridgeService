@@ -9,8 +9,8 @@
 
 # --- Data Models (Gson) ---
 # مدل‌های دیتا که با Gson پارس می‌شوند نباید تغییر نام دهند
--keep class com.v2ray.ang.data.** { *; }
--keep class com.v2ray.ang.dto.** { *; }
+-keep class bah.saj.am.data.** { *; }
+-keep class bah.saj.am.dto.** { *; }
 
 # --- Android Components ---
 -keep class * extends android.app.Activity

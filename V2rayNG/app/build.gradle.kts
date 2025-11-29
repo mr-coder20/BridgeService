@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.v2ray.ang"
+    namespace = "bah.saj.am"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.v2ray.ang"
+        applicationId = "bah.saj.am"
         minSdk = 21
         targetSdk = 35
         versionCode = 100 // <--- نسخه پایه و واضح برنامه شما
@@ -53,7 +53,6 @@ android {
     productFlavors {
         create("bridge") {
             dimension = "distribution"
-            applicationIdSuffix = ".bridge"
             buildConfigField("String", "DISTRIBUTION", "\"\"")
         }
         create("playstore") {
