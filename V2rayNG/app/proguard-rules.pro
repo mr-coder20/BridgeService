@@ -46,6 +46,12 @@
 -keep interface okhttp3.** { *; }
 -dontwarn okhttp3.**
 
+# Fix for JSch missing JZlib dependency
+-dontwarn com.jcraft.jzlib.**
+
+# Fix for JSch missing Java GSS-API (Kerberos) dependency
+-dontwarn org.ietf.jgss.**
+
 # --- V2RayNG Core Specifics ---
 # اگر کلاس‌های خاصی دارید که نباید obfuscate شوند (مثلاً Interfaceهای JNI)
 -keepclasseswithmembernames class * {
