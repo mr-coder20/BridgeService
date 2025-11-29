@@ -8,7 +8,10 @@
     <color name="color_fab_inactive">#9C9C9C</color>
     <color name="color_secondary">#727272</color>
     <color name="divider_color_light">#E0E0E0</color>
-
-    <color name="colorPrimary">#F5F5F5</color>
-    <color name="colorAccent">#000000</color>
+    <!-- 🎨 رنگ‌های مدرن و جذاب (Material Inspired) -->
+    <color name="colorPrimary">#6750A4</color>
+    <color name="colorPrimaryDark">#4F378B</color>
+    <color name="colorAccent">#FF6F61</color>
+    <color name="colorSurface">#FFFFFF</color>
+    <color name="colorFabActive">#FF6F61</color>
 </resources>

@@ -1,21 +1,23 @@
 package com.v2ray.ang.viewmodel
 
-import android.content.Context
+import android.app.Application
 import android.util.Log
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.data.MikroTikRepository
 import com.v2ray.ang.data.UpdateInfo
 import com.v2ray.ang.util.Event
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-class PreCheckViewModel : ViewModel() {
+class PreCheckViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = MikroTikRepository()
+    private val repository = MikroTikRepository(application)
 
     private val _uiState = MutableLiveData<PreCheckUiState>()
     val uiState: LiveData<PreCheckUiState> = _uiState
@@ -35,7 +37,10 @@ class PreCheckViewModel : ViewModel() {
                 statusMessage = "Checking Internet Connection..."
             )
 
-            val networkStatus = repository.checkInternetConnectivity()
+            val networkStatus = withContext(Dispatchers.IO) {
+                repository.checkInternetConnectivity()
+            }
+
             _uiState.value = _uiState.value?.copy(localIp = "Local IP: ${networkStatus.localIp ?: "—"}")
 
             if (!networkStatus.isReachable) {
@@ -49,91 +54,134 @@ class PreCheckViewModel : ViewModel() {
             // 2. شروع بررسی آپدیت
             _uiState.value = _uiState.value?.copy(statusMessage = "Checking for updates...")
             val config = networkStatus.config
-
-            // دریافت نسخه فعلی برنامه
             val currentVersionCode = BuildConfig.VERSION_CODE.toLong()
 
-            Log.d("UpdateCheck", "App Version: $currentVersionCode")
-
             if (config != null) {
-                Log.d("UpdateCheck", "Remote Config -> Latest: ${config.latestVersionCode}, MinRequired: ${config.minRequiredVersionCode}")
-
-                // منطق اصلی آپدیت
                 if (currentVersionCode < config.minRequiredVersionCode) {
-                    // --- آپدیت اجباری ---
-                    Log.d("UpdateCheck", "Status: FORCED UPDATE REQUIRED")
-
                     _events.value = Event(PreCheckEvent.ShowUpdateDialog(
-                        UpdateInfo(
-                            isForced = true,
-                            versionName = config.latestVersionName,
-                            releaseNotes = config.releaseNotes,
-                            updateUrl = config.updateUrl
-                        )
+                        UpdateInfo(true, config.latestVersionName, config.releaseNotes, config.updateUrl)
                     ))
-
-                    _uiState.value = _uiState.value?.copy(
-                        isNetworkCheckInProgress = false,
-                        statusMessage = "Update Required"
-                    )
+                    _uiState.value = _uiState.value?.copy(isNetworkCheckInProgress = false, statusMessage = "Update Required")
                     return@launch
-
                 } else if (currentVersionCode < config.latestVersionCode) {
-                    // --- آپدیت اختیاری ---
-                    Log.d("UpdateCheck", "Status: OPTIONAL UPDATE AVAILABLE")
-
                     _events.value = Event(PreCheckEvent.ShowUpdateDialog(
-                        UpdateInfo(
-                            isForced = false,
-                            versionName = config.latestVersionName,
-                            releaseNotes = config.releaseNotes,
-                            updateUrl = config.updateUrl
-                        )
+                        UpdateInfo(false, config.latestVersionName, config.releaseNotes, config.updateUrl)
                     ))
-                } else {
-                    Log.d("UpdateCheck", "Status: NO UPDATE NEEDED")
                 }
-            } else {
-                Log.w("UpdateCheck", "Config was NULL. Skipping update check.")
             }
 
-            // 3. نمایش صفحه لاگین
-            _uiState.value = _uiState.value?.copy(
-                isNetworkCheckInProgress = false,
-                statusMessage = "Please enter your credentials.",
-                isLoginContainerVisible = true
-            )
+            // 3. بررسی لاگین خودکار
+            checkAutoLogin()
         }
     }
 
-    fun authenticate(context: Context, user: String, pass: String) {
+    private suspend fun checkAutoLogin() {
+        val (savedUser, savedPass) = withContext(Dispatchers.IO) {
+            repository.getSavedCredentials()
+        }
+
+        if (!savedUser.isNullOrEmpty() && !savedPass.isNullOrEmpty()) {
+            _uiState.value = _uiState.value?.copy(
+                isNetworkCheckInProgress = false,
+                isLoginContainerVisible = false,
+                isLoginInProgress = true,
+                statusMessage = "Auto-logging in..."
+            )
+
+            val result = repository.authenticateSsh(getApplication(), savedUser, savedPass)
+
+            if (result.success) {
+                _uiState.value = _uiState.value?.copy(isLoginInProgress = false, statusMessage = "Connected & Secure.")
+                _events.value = Event(PreCheckEvent.AuthenticationSuccess)
+            } else {
+                if (result.message.contains("Invalid username", ignoreCase = true)) {
+                    withContext(Dispatchers.IO) {
+                        repository.clearCredentials()
+                    }
+                    showLoginScreen("Auth failed: Password incorrect. Please login again.")
+                } else {
+                    showLoginScreen("Auto-login failed: ${result.message} (Tap Login to retry)")
+                }
+            }
+        } else {
+            showLoginScreen("Please enter your credentials.")
+        }
+    }
+
+    private fun showLoginScreen(message: String) {
+        _uiState.value = _uiState.value?.copy(
+            isNetworkCheckInProgress = false,
+            isLoginInProgress = false,
+            statusMessage = message,
+            isLoginContainerVisible = true
+        )
+    }
+
+    fun authenticate(user: String, pass: String) {
         if (user.isBlank() || pass.isBlank()) {
             _uiState.value = _uiState.value?.copy(statusMessage = "Username and password cannot be empty.")
             return
         }
         viewModelScope.launch {
             _uiState.value = _uiState.value?.copy(isLoginInProgress = true, statusMessage = "Authenticating via SSH...")
-
-            // --- تغییر اصلی: استفاده از authenticateSsh ---
-            val result = repository.authenticateSsh(context, user, pass)
-
+            val result = repository.authenticateSsh(getApplication(), user, pass)
             _uiState.value = _uiState.value?.copy(isLoginInProgress = false, statusMessage = result.message)
 
             if (result.success) {
                 _events.value = Event(PreCheckEvent.AuthenticationSuccess)
             } else if (result.message == "CONFIG_MISSING") {
-                // --- مدیریت حالت اضطراری (نبودن کانفیگ و آدرس) ---
-                _events.value = Event(PreCheckEvent.ShowToast("Network configuration missing. Please try again later."))
-                // کمی تاخیر تا کاربر پیام را ببیند
+                _events.value = Event(PreCheckEvent.ShowToast("Network configuration missing."))
                 delay(1500)
                 _events.value = Event(PreCheckEvent.CloseApp)
             }
         }
     }
 
+    // ---------------------------------------------------------------------------
+    //  بخش انتقال یوزر (Export/Import Logic)
+    // ---------------------------------------------------------------------------
+
+    // --- بخش جدید: تولید توکن رمزنگاری شده برای انتقال (مخصوص دکمه Export Code) ---
+    fun generateTransferToken() {
+        viewModelScope.launch {
+            val token = withContext(Dispatchers.IO) {
+                repository.exportTransferToken()
+            }
+
+            if (token != null) {
+                _events.value = Event(PreCheckEvent.ShowTokenDialog(token))
+            } else {
+                _events.value = Event(PreCheckEvent.ShowToast("No saved account found to export."))
+            }
+        }
+    }
+
+    // --- بخش جدید: پردازش توکن وارد شده (مخصوص دکمه Enter Code) ---
+    fun importTransferToken(token: String) {
+        if (token.isBlank()) return
+
+        viewModelScope.launch {
+            // دیکد کردن توکن در ترد IO
+            val creds = withContext(Dispatchers.IO) {
+                repository.importTransferToken(token)
+            }
+
+            if (creds != null) {
+                val (user, pass) = creds
+                // انجام لاگین با اطلاعات استخراج شده
+                authenticate(user, pass)
+            } else {
+                _events.value = Event(PreCheckEvent.ShowToast("Invalid or corrupted Token!"))
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+
     fun clearCredentials() {
+        repository.clearCredentials()
         _events.value = Event(PreCheckEvent.ClearFields)
-        _uiState.value = _uiState.value?.copy(statusMessage = "Please enter your credentials.")
+        _uiState.value = _uiState.value?.copy(statusMessage = "Credentials cleared.")
     }
 
     fun onVpnPermissionGranted() {
@@ -141,7 +189,7 @@ class PreCheckViewModel : ViewModel() {
     }
 
     fun onVpnPermissionDenied() {
-        _uiState.value = _uiState.value?.copy(statusMessage = "VPN permission is required for auto-connect.")
+        _uiState.value = _uiState.value?.copy(statusMessage = "VPN permission is required.")
         _events.value = Event(PreCheckEvent.ShowToast("VPN permission denied."))
     }
 
@@ -150,12 +198,11 @@ class PreCheckViewModel : ViewModel() {
     }
 
     fun onNotificationPermissionDenied() {
-        _uiState.value = _uiState.value?.copy(statusMessage = "Notification permission is required to show status.")
+        _uiState.value = _uiState.value?.copy(statusMessage = "Notification permission required.")
         _events.value = Event(PreCheckEvent.ShowToast("Notification permission denied."))
     }
 }
 
-// کلاس‌های دیتا و Event
 data class PreCheckUiState(
     val isNetworkCheckInProgress: Boolean = false,
     val isLoginInProgress: Boolean = false,
@@ -169,7 +216,14 @@ sealed class PreCheckEvent {
     object RequestVpnPermission : PreCheckEvent()
     object NavigateToMain : PreCheckEvent()
     object ClearFields : PreCheckEvent()
-    object CloseApp : PreCheckEvent() // <--- رویداد جدید برای بستن برنامه
+    object CloseApp : PreCheckEvent()
     data class ShowToast(val message: String) : PreCheckEvent()
     data class ShowUpdateDialog(val updateInfo: UpdateInfo) : PreCheckEvent()
+
+    // --- ایونت‌های انتقال یوزر ---
+    data class ShowCredentialsDialog(val user: String, val pass: String) : PreCheckEvent()
+    data class ShowQrCodeDialog(val qrContent: String) : PreCheckEvent()
+
+    // +++ این مورد برای سیستم جدید توکن الزامی است +++
+    data class ShowTokenDialog(val token: String) : PreCheckEvent()
 }

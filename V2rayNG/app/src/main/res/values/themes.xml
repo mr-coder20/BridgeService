@@ -1,35 +1,38 @@
 <resources>
 
-    <style name="AppThemeDayNight" parent="Theme.AppCompat.DayNight">
+
+
+    <!-- 🌈 تم اصلی برنامه (فقط لایت) -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="colorPrimary">@color/colorPrimary</item>
-        <item name="colorPrimaryDark">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
-        <item name="android:statusBarColor">@color/colorPrimary</item>
+
+        <!-- نوار وضعیت و ناوبری شفاف و زیبا -->
+        <item name="android:statusBarColor">@color/colorPrimaryDark</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+
+        <!-- کنترل‌های زیباتر -->
         <item name="colorControlNormal">@color/colorAccent</item>
+        <item name="colorControlActivated">@color/colorPrimary</item>
     </style>
 
-    <style name="AppThemeDayNight.NoActionBar" parent="AppThemeDayNight">
+    <!-- ⬆️ نسخه بدون اکشن‌بار -->
+    <style name="AppTheme.NoActionBar" parent="AppTheme">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
     </style>
 
-    <!-- Base application theme. -->
-    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar" />
-
-    <style name="AppTheme.NoActionBar">
-        <item name="windowActionBar">false</item>
-        <item name="windowNoTitle">true</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-    </style>
-
-    <style name="AppTheme.NoActionBar.Translucent">
+    <!-- ✨ نسخه ترنسپرنت برای صفحات خاص (مثل اسپلش یا دیالوگ‌های تمام‌صفحه) -->
+    <style name="AppTheme.NoActionBar.Translucent" parent="AppTheme.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:colorBackgroundCacheHint">@null</item>
         <item name="android:windowIsTranslucent">true</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
     </style>
 
-    <style name="BrandedSwitch" parent="AppTheme">
-        <item name="colorAccent">@color/color_fab_active</item>
+    <!-- 🔘 سوئیچ برندینگ با رنگ جذاب -->
+    <style name="BrandedSwitch" parent="Widget.AppCompat.CompoundButton.Switch">
+        <item name="colorAccent">@color/colorFabActive</item>
     </style>
+
 </resources>

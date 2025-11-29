@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 import java.util.Collections
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private var serverList = MmkvManager.decodeServerList()
+    var serverList = MmkvManager.decodeServerList()
     var subscriptionId: String = MmkvManager.decodeSettingsString(AppConfig.CACHE_SUBSCRIPTION_ID, "").orEmpty()
 
     //var keywordFilter: String = MmkvManager.MmkvManager.decodeSettingsString(AppConfig.CACHE_KEYWORD_FILTER, "")?:""

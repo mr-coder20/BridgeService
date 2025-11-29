@@ -1,12 +1,16 @@
 package com.v2ray.ang
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
@@ -19,19 +23,20 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
-import androidx.lifecycle.distinctUntilChanged  // اضافه کردم برای جلوگیری از آپدیت‌های غیرضروری
+import androidx.lifecycle.lifecycleScope
 import com.v2ray.ang.data.UpdateInfo
 import com.v2ray.ang.ui.MainActivity
 import com.v2ray.ang.viewmodel.PreCheckEvent
 import com.v2ray.ang.viewmodel.PreCheckViewModel
+import es.dmoral.toasty.Toasty
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import androidx.lifecycle.lifecycleScope
 
 class PreCheckActivity : AppCompatActivity() {
 
     private val viewModel: PreCheckViewModel by viewModels()
 
+    // ویوهای اصلی
     private lateinit var edtUsername: EditText
     private lateinit var edtPassword: EditText
     private lateinit var btnLogin: Button
@@ -39,7 +44,11 @@ class PreCheckActivity : AppCompatActivity() {
     private lateinit var txtStatus: TextView
     private lateinit var progressCheckNetwork: ProgressBar
     private lateinit var progressLogin: ProgressBar
-    private lateinit var loginContainer: android.view.View
+    private lateinit var loginContainer: View
+
+    // ویوهای جدید برای انتقال اکانت
+    private lateinit var btnShowToken: Button
+    private lateinit var btnEnterToken: Button
 
     private val requestVpnPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -53,7 +62,9 @@ class PreCheckActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // مطمئن شوید که نام فایل XML شما activity_pre_check است (طبق کدهای قبلی)
         setContentView(R.layout.activity_precheck)
+
         setupViews()
         setupListeners()
         observeViewModel()
@@ -62,7 +73,8 @@ class PreCheckActivity : AppCompatActivity() {
     private fun setupViews() {
         val toolbar: Toolbar = findViewById(R.id.toolbar)
         setSupportActionBar(toolbar)
-        supportActionBar?.title = "Login"
+        supportActionBar?.title = getString(R.string.app_name)
+
         edtUsername = findViewById(R.id.edtUsername)
         edtPassword = findViewById(R.id.edtPassword)
         btnLogin = findViewById(R.id.btnLogin)
@@ -71,66 +83,148 @@ class PreCheckActivity : AppCompatActivity() {
         progressCheckNetwork = findViewById(R.id.progressCheckNetwork)
         progressLogin = findViewById(R.id.progressLogin)
         loginContainer = findViewById(R.id.loginContainer)
+
+        // دکمه‌های جدید انتقال اکانت
+        btnShowToken = findViewById(R.id.btnShowToken)
+        btnEnterToken = findViewById(R.id.btnEnterToken)
     }
 
     private fun setupListeners() {
+        // دکمه لاگین
         btnLogin.setOnClickListener {
-            // استفاده از lifecycleScope برای اجرای سریع‌تر
+            val username = edtUsername.text.toString().trim()
+            val password = edtPassword.text.toString().trim()
             lifecycleScope.launch(Dispatchers.Main) {
-                viewModel.authenticate(
-                    this@PreCheckActivity,
-                    edtUsername.text.toString(),
-                    edtPassword.text.toString()
-                )
+                viewModel.authenticate(username, password)
             }
         }
+
+        // دکمه پاک کردن دیتا
         btnClear.setOnClickListener {
             lifecycleScope.launch(Dispatchers.Main) {
                 viewModel.clearCredentials()
             }
         }
+
+        // دکمه نمایش توکن (Export) - برای دستگاه مبدا
+        btnShowToken.setOnClickListener {
+            lifecycleScope.launch(Dispatchers.Main) {
+                viewModel.generateTransferToken()
+            }
+        }
+
+        // دکمه وارد کردن توکن (Import) - برای دستگاه مقصد
+        btnEnterToken.setOnClickListener {
+            showEnterTokenDialog()
+        }
     }
 
     private fun observeViewModel() {
-        // اضافه کردم distinctUntilChanged برای جلوگیری از آپدیت‌های تکراری و سرعت بالاتر
-        viewModel.uiState.distinctUntilChanged().observe(this) { state ->
+        viewModel.uiState.observe(this) { state ->
             progressCheckNetwork.isVisible = state.isNetworkCheckInProgress
             progressLogin.isVisible = state.isLoginInProgress
             loginContainer.isVisible = state.isLoginContainerVisible
 
-            val loginEnabled = !state.isLoginInProgress
-            btnLogin.isEnabled = loginEnabled
-            btnClear.isEnabled = loginEnabled
-            edtUsername.isEnabled = loginEnabled
-            edtPassword.isEnabled = loginEnabled
+            // غیرفعال کردن دکمه‌ها هنگام عملیات
+            val controlsEnabled = !state.isLoginInProgress
+            btnLogin.isEnabled = controlsEnabled
+            btnClear.isEnabled = controlsEnabled
+            edtUsername.isEnabled = controlsEnabled
+            edtPassword.isEnabled = controlsEnabled
+            btnShowToken.isEnabled = controlsEnabled
+            btnEnterToken.isEnabled = controlsEnabled
 
             txtStatus.text = state.statusMessage
         }
 
-        // اضافه کردم distinctUntilChanged برای جلوگیری از آپدیت‌های تکراری
-        viewModel.events.distinctUntilChanged().observe(this) { event ->
+        viewModel.events.observe(this) { event ->
             event.getContentIfNotHandled()?.let { eventContent ->
                 when (eventContent) {
-                    is PreCheckEvent.AuthenticationSuccess -> checkPermissionsAndProceed()
+                    is PreCheckEvent.AuthenticationSuccess -> {
+                        Toasty.success(this, "Login Successful!", Toast.LENGTH_SHORT).show()
+                        checkPermissionsAndProceed()
+                    }
                     is PreCheckEvent.RequestVpnPermission -> checkAndRequestVpnPermission()
                     is PreCheckEvent.NavigateToMain -> navigateToMainActivity()
                     is PreCheckEvent.ClearFields -> {
                         edtUsername.text.clear()
                         edtPassword.text.clear()
+                        Toasty.info(this, "Credentials cleared.", Toast.LENGTH_SHORT).show()
                     }
                     is PreCheckEvent.ShowToast -> {
-                        Toast.makeText(this, eventContent.message, Toast.LENGTH_SHORT).show()
+                        // استفاده از Toasty برای نمایش زیباتر ارورها یا پیام‌ها
+                        if (eventContent.message.contains("fail", true) || eventContent.message.contains("error", true)) {
+                            Toasty.error(this, eventContent.message, Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toasty.info(this, eventContent.message, Toast.LENGTH_SHORT).show()
+                        }
                     }
                     is PreCheckEvent.ShowUpdateDialog -> showUpdateDialog(eventContent.updateInfo)
+                    is PreCheckEvent.CloseApp -> finishAffinity()
 
-                    // --- تغییر جدید: هندل کردن بسته شدن برنامه ---
-                    is PreCheckEvent.CloseApp -> {
-                        finishAffinity() // بستن کامل برنامه
-                    }
+                    // نمایش دیالوگ توکن خروجی
+                    is PreCheckEvent.ShowTokenDialog -> showExportTokenDialog(eventContent.token)
+
+                    // سایر ایونت‌ها اگر وجود داشت...
+                    else -> {}
                 }
             }
         }
     }
+
+    // --- دیالوگ‌های انتقال اکانت ---
+
+    private fun showExportTokenDialog(token: String) {
+        val editText = EditText(this).apply {
+            setText(token)
+            setPadding(50, 50, 50, 50)
+            textSize = 16f
+            background = null
+            isFocusable = false // فقط خواندنی
+            isClickable = true
+            setTextIsSelectable(true) // امکان کپی کردن متن
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Transfer Code")
+            .setMessage("Enter this code on your TV or other device:")
+            .setView(editText)
+            .setPositiveButton("Copy Code") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("V2Ray Transfer Token", token)
+                clipboard.setPrimaryClip(clip)
+                Toasty.success(this, "Code copied to clipboard!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showEnterTokenDialog() {
+        val input = EditText(this).apply {
+            hint = "Paste code here (starts with V2R-)"
+            setPadding(50, 50, 50, 50)
+            textSize = 16f
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Import Account")
+            .setMessage("Enter the transfer code generated from your phone:")
+            .setView(input)
+            .setPositiveButton("Import") { _, _ ->
+                val token = input.text.toString().trim()
+                if (token.isNotEmpty()) {
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        viewModel.importTransferToken(token)
+                    }
+                } else {
+                    Toasty.warning(this, "Token cannot be empty", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // --- سایر متدها ---
 
     private fun showUpdateDialog(info: UpdateInfo) {
         if (isFinishing || isDestroyed) return
@@ -148,27 +242,24 @@ class PreCheckActivity : AppCompatActivity() {
                     finishAffinity()
                 }
             } catch (e: Exception) {
-                Toast.makeText(this, "Could not open link.", Toast.LENGTH_SHORT).show()
+                Toasty.error(this, "Could not open update link.", Toast.LENGTH_SHORT).show()
             }
         }
 
         if (info.isForced) {
-            builder.setTitle("Update Required (${info.versionName})")
-            builder.setMessage("A mandatory update is required to continue.\n\nChanges:\n${info.releaseNotes}")
+            builder.setTitle("Update Required")
             builder.setNegativeButton("Exit App") { dialog, _ ->
                 dialog.dismiss()
                 finishAffinity()
             }
         } else {
-            builder.setMessage("A new version is available.\n\nChanges:\n${info.releaseNotes}")
-            builder.setNegativeButton("Continue / Later") { dialog, _ ->
+            builder.setNegativeButton("Later") { dialog, _ ->
                 dialog.dismiss()
             }
         }
 
         builder.create().show()
     }
-
 
     private fun checkPermissionsAndProceed() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -192,11 +283,8 @@ class PreCheckActivity : AppCompatActivity() {
     }
 
     private fun navigateToMainActivity() {
-        // حذف آپدیت txtStatus برای سرعت بالاتر (اختیاری، اگر آپدیت کند باشد)
-        // txtStatus.text = "Permissions granted. Redirecting..."
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("AUTO_CONNECT_RADIUS", true)
-            // اضافه کردم FLAG_ACTIVITY_CLEAR_TOP برای ناوبری سریع‌تر
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         startActivity(intent)

@@ -37,7 +37,7 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <!-- این بخش برای نمایش وضعیت اولیه و ProgressBar استفاده می‌شود -->
+            <!-- ProgressBar -->
             <ProgressBar
                 android:id="@+id/progressCheckNetwork"
                 style="?android:attr/progressBarStyle"
@@ -46,7 +46,6 @@
                 android:visibility="gone"
                 tools:visibility="visible" />
 
-            <!-- کانتینر لاگین -->
             <!-- کانتینر لاگین -->
             <androidx.cardview.widget.CardView
                 android:id="@+id/loginContainer"
@@ -64,6 +63,14 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Login Server"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="12dp"/>
+
                     <!-- فیلد نام کاربری -->
                     <EditText
                         android:id="@+id/edtUsername"
@@ -73,16 +80,13 @@
                         android:importantForAutofill="no"
                         android:singleLine="true" />
 
-                    <!-- فیلد رمز عبور با قابلیت مشاهده رمز (چشم) -->
-                    <!-- تغییرات: استفاده از TextInputLayout برای افزودن دکمه چشم -->
+                    <!-- فیلد رمز عبور -->
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         app:endIconMode="password_toggle"
                         app:hintEnabled="false">
-
-                        <!-- نکته: hintEnabled=false باعث می‌شود ظاهر شبیه EditText بالا بماند -->
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/edtPassword"
@@ -93,13 +97,13 @@
                             android:importantForAutofill="no"
                             android:inputType="textPassword"
                             android:singleLine="true" />
-
                     </com.google.android.material.textfield.TextInputLayout>
 
+                    <!-- دکمه‌های لاگین و پاک کردن -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginTop="16dp"
                         android:gravity="center_vertical">
 
                         <Button
@@ -110,11 +114,12 @@
 
                         <Button
                             android:id="@+id/btnClear"
-                            style="@style/Widget.AppCompat.Button.Colored"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
-                            android:text="Clear" />
+                            android:textColor="@android:color/holo_red_dark"
+                            android:text="Reset" />
 
                         <ProgressBar
                             android:id="@+id/progressLogin"
@@ -125,12 +130,58 @@
                             android:visibility="gone"
                             tools:visibility="visible" />
                     </LinearLayout>
+
+                    <!-- خط جداکننده -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="#E0E0E0"
+                        android:layout_marginTop="16dp"
+                        android:layout_marginBottom="12dp"/>
+
+                    <!-- بخش انتقال اکانت (جدید) -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Device Transfer (TV/Phone)"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:layout_marginBottom="8dp"/>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <!-- دکمه دریافت کد (نمایش در مبدا) -->
+                        <Button
+                            android:id="@+id/btnShowToken"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:text="Export Code"
+                            android:textSize="12sp"
+                            android:layout_marginEnd="4dp"/>
+
+                        <!-- دکمه وارد کردن کد (در مقصد) -->
+                        <Button
+                            android:id="@+id/btnEnterToken"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:text="Enter Code"
+                            android:textSize="12sp"
+                            android:layout_marginStart="4dp"/>
+                    </LinearLayout>
+
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- بخش نمایش وضعیت -->
+            <!-- استاتوس -->
             <LinearLayout
-
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
@@ -138,17 +189,14 @@
                 android:orientation="vertical">
 
                 <TextView
-                    android:textSize="20sp"
                     android:id="@+id/txtStatus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:gravity="center"
+                    android:textSize="15sp"
                     android:textAppearance="?attr/textAppearanceBodyMedium"
-                    tools:text="Status: Checking for updates..." />
-
-
+                    tools:text="Status: Ready" />
             </LinearLayout>
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
-
 </LinearLayout>

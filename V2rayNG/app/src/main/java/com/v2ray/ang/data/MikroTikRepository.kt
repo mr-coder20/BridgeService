@@ -1,37 +1,105 @@
 package com.v2ray.ang.data
 
 import android.content.Context
-import android.net.ConnectivityManager
+import android.content.SharedPreferences
 import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
+import android.os.Build
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.util.Log
+import androidx.annotation.RequiresApi
+import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import com.jcraft.jsch.SocketFactory
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.Proxy
 import java.net.Socket
+import java.security.KeyStore
+import java.security.SecureRandom
 import java.util.Properties
-import kotlin.coroutines.resume
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 data class AuthResult(val success: Boolean, val message: String)
 
-class MikroTikRepository {
+class MikroTikRepository(private val context: Context) {
 
     private val networkChecker = NetworkConnectivityChecker()
     private var cachedConfig: AppConfig? = null
 
-    // تایم‌اوت‌ها را کاهش دادم برای سرعت بالاتر (تشخیص سریع‌تر auth fail)
-    private val SSH_TIMEOUT = 8000  // کاهش از 30000 به 8000 میلی‌ثانیه
-    private val CONNECTION_TIMEOUT = 3000  // کاهش از 10000 به 3000 میلی‌ثانیه
-    private val SOCKET_TIMEOUT = 5000  // کاهش از 15000 به 5000 میلی‌ثانیه
+    // تایم‌اوت‌ها
+    private val SSH_TIMEOUT = 10000
+    private val CONNECTION_TIMEOUT = 5000
+    private val SOCKET_TIMEOUT = 10000
+
+    private val PREF_FILE = "mikrotik_secure_prefs"
+    private val PREF_USERNAME = "secure_username"
+    private val PREF_PASSWORD = "secure_password"
+    private val PREF_IV_USER = "secure_iv_user"
+    private val PREF_IV_PASS = "secure_iv_pass"
+    private val PREF_LEGACY_KEY = "secure_legacy_key"
+
+    private val prefs: SharedPreferences = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+    private val ANDROID_KEY_STORE = "AndroidKeyStore"
+    private val KEY_ALIAS = "MikroTik_Hardware_Key_v2"
+
+    // --- مدیریت کلید رمزنگاری (ضد دیکامپایل) ---
+    private fun getSecretKey(): SecretKey {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            getKeystoreSecretKey()
+        } else {
+            getLegacySecretKey()
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.M)
+    private fun getKeystoreSecretKey(): SecretKey {
+        try {
+            val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE)
+            keyStore.load(null)
+            if (!keyStore.containsAlias(KEY_ALIAS)) {
+                val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
+                keyGenerator.init(
+                    KeyGenParameterSpec.Builder(
+                        KEY_ALIAS,
+                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                    )
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .setRandomizedEncryptionRequired(true)
+                        .build()
+                )
+                return keyGenerator.generateKey()
+            }
+            return keyStore.getKey(KEY_ALIAS, null) as SecretKey
+        } catch (e: Exception) {
+            throw e
+        }
+    }
+
+    private fun getLegacySecretKey(): SecretKey {
+        val storedKey = prefs.getString(PREF_LEGACY_KEY, null)
+        return if (storedKey != null) {
+            val decodedKey = Base64.decode(storedKey, Base64.DEFAULT)
+            SecretKeySpec(decodedKey, "AES")
+        } else {
+            val secureRandom = SecureRandom()
+            val keyBytes = ByteArray(32)
+            secureRandom.nextBytes(keyBytes)
+            val encodedKey = Base64.encodeToString(keyBytes, Base64.DEFAULT)
+            prefs.edit().putString(PREF_LEGACY_KEY, encodedKey).apply()
+            SecretKeySpec(keyBytes, "AES")
+        }
+    }
 
     suspend fun checkInternetConnectivity(): NetworkStatus {
         val status = networkChecker.checkInternetConnectivity()
@@ -49,119 +117,122 @@ class MikroTikRepository {
             }
 
             val routerList = currentConfig.routerIps
-
-            // تلاش برای یافتن شبکه فیزیکی (برای دور زدن باگ‌های احتمالی روتینگ اندروید)
-            val physicalNetwork = findPhysicalNetwork(context)
-
-            if (physicalNetwork != null) {
-                Log.i("SSHAuth", "Physical network acquired: $physicalNetwork")
-            } else {
-                Log.w("SSHAuth", "No physical network found! Using default route.")
-            }
-
-            // متغیری برای نگهداری آخرین خطای واقعی دریافت شده
             var lastErrorMessage = "All routers are unreachable"
 
             for (routerAddress in routerList) {
-                val (host, port) = parseHostAndPort(routerAddress)
-                Log.d("SSHAuth", "Attempting connection to: $host:$port")
+                val (host, originalPort) = parseHostAndPort(routerAddress)
 
-                val result = trySshConnectJSch(host, port, user, pass, physicalNetwork)
+                // اگر پورت اصلی کار نکرد، پورت استاندارد 22 را تست کن
+                val portsToTry = if (originalPort != 22) listOf(originalPort, 22) else listOf(22)
 
-                if (result.success) {
-                    return@withContext result
-                } else {
-                    // خطای واقعی (ترجمه شده) را ذخیره می‌کنیم
-                    lastErrorMessage = result.message
-                    Log.w("SSHAuth", "Failed to connect to $host: ${result.message}")
+                for (port in portsToTry) {
+                    Log.d("SSHAuth", "Checking router: $host:$port")
 
-                    // --- تغییر جدید: اگر auth fail باشد، دیگر روترها را تست نکن ---
-                    if (result.message == "Invalid username or password") {
-                        Log.i("SSHAuth", "Auth failed, stopping further attempts as password is likely incorrect for all routers.")
-                        return@withContext AuthResult(false, lastErrorMessage)
+                    var attempts = 0
+                    var loginResult: AuthResult
+
+                    do {
+                        attempts++
+                        loginResult = trySshConnectJSch(host, port, user, pass)
+
+                        if (loginResult.success || loginResult.message == "Invalid username or password") break
+                        if (loginResult.message.contains("Connection refused")) break // سریع برو پورت بعدی
+
+                        if (attempts < 2) Thread.sleep(1000)
+                    } while (attempts < 2)
+
+                    if (loginResult.success) {
+                        Log.i("SSHAuth", "Login OK on $host:$port. Secure rotation started...")
+
+                        val newPassword = generateStrongPassword()
+
+                        // تغییر پسورد در روتر (Fire & Forget)
+                        changePasswordViaSsh(host, port, user, pass, newPassword)
+
+                        // ذخیره امن
+                        saveCredentialsSecurely(user, newPassword)
+
+                        return@withContext AuthResult(true, "Login Successful")
+
+                    } else {
+                        lastErrorMessage = loginResult.message
+                        Log.w("SSHAuth", "Failed on $host:$port: ${loginResult.message}")
+
+                        if (loginResult.message == "Invalid username or password") {
+                            return@withContext AuthResult(false, loginResult.message)
+                        }
                     }
                 }
             }
-
-            // در اینجا آخرین خطای واقعی (مثل Invalid Password یا Connection Refused) برگردانده می‌شود
             return@withContext AuthResult(false, lastErrorMessage)
         }
 
-    private suspend fun findPhysicalNetwork(context: Context): Network? =
-        suspendCancellableCoroutine { cont ->
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private suspend fun changePasswordViaSsh(
+        host: String, port: Int, user: String, oldPass: String, newPass: String
+    ) {
+        withContext(Dispatchers.IO) {
+            var session: Session? = null
+            var channel: ChannelExec? = null
+            try {
+                val jsch = JSch()
+                session = jsch.getSession(user, host, port)
+                session.setPassword(oldPass)
+                session.setSocketFactory(SimpleSocketFactory(CONNECTION_TIMEOUT, SOCKET_TIMEOUT))
 
-            val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .removeTransportType(NetworkCapabilities.TRANSPORT_VPN)
-                .build()
+                val config = Properties()
+                config["StrictHostKeyChecking"] = "no"
+                config["PreferredAuthentications"] = "password"
+                config["kex"] = "diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha256,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521"
+                config["cipher.s2c"] = "aes256-ctr,aes192-ctr,aes128-ctr"
+                config["cipher.c2s"] = "aes256-ctr,aes192-ctr,aes128-ctr"
+                session.setConfig(config)
 
-            val callback = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    if (cont.isActive) {
-                        cont.resume(network)
-                        // جلوگیری از کرش در APIهای قدیمی هنگام Unregister
-                        try { cm.unregisterNetworkCallback(this) } catch (e: Exception) {}
-                    }
+                session.connect(SSH_TIMEOUT)
+
+                if (session.isConnected) {
+                    val command = "/user-manager user set [find name=\"$user\"] password=\"$newPass\""
+                    channel = session.openChannel("exec") as ChannelExec
+                    channel.setCommand(command)
+                    channel.inputStream = null
+                    channel.connect()
+
+                    Thread.sleep(1500) // زمان انتظار کوتاه برای اجرای دستور
+
+                    channel.disconnect()
+                    session.disconnect()
                 }
-
-                override fun onUnavailable() {
-                    if (cont.isActive) cont.resume(null)
-                }
-            }
-
-            // بررسی ورژن اندروید برای استفاده از متد مناسب
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                // برای اندروید 8 (API 26) به بالا
-                cm.requestNetwork(request, callback, 2000)  // کاهش تایم‌اوت از 3000 به 2000
-            } else {
-                // برای اندرویدهای قدیمی‌تر (API 21 تا 25)
-                // این نسخه تایم‌اوت ندارد، پس دستی تایم‌اوت می‌گذاریم
-                cm.requestNetwork(request, callback)
-
-                // هندل کردن تایم‌اوت به صورت دستی با Coroutine
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    if (cont.isActive) {
-                        cont.resume(null)
-                        try { cm.unregisterNetworkCallback(callback) } catch (e: Exception) {}
-                    }
-                }, 2000)  // کاهش تایم‌اوت از 3000 به 2000
+            } catch (e: Exception) {
+                Log.e("SSHAuth", "Command execution ended.")
             }
         }
-
+    }
 
     private fun trySshConnectJSch(
         host: String,
         port: Int,
         user: String,
-        pass: String,
-        network: Network?
+        pass: String
     ): AuthResult {
         var session: Session? = null
         return try {
             val jsch = JSch()
             session = jsch.getSession(user, host, port)
             session.setPassword(pass)
-
-            session.setSocketFactory(NetworkBoundSocketFactory(network, CONNECTION_TIMEOUT, SOCKET_TIMEOUT))
+            session.setSocketFactory(SimpleSocketFactory(CONNECTION_TIMEOUT, SOCKET_TIMEOUT))
 
             val config = Properties()
             config["StrictHostKeyChecking"] = "no"
             config["PreferredAuthentications"] = "password"
-            config["kex"] = "diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521"
-            config["cipher.s2c"] = "aes128-ctr,aes128-cbc,3des-ctr,3des-cbc,blowfish-cbc,aes192-cbc,aes256-cbc"
-            config["cipher.c2s"] = "aes128-ctr,aes128-cbc,3des-ctr,3des-cbc,blowfish-cbc,aes192-cbc,aes256-cbc"
-
+            config["kex"] = "diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha256,ecdh-sha2-nistp256"
+            config["cipher.s2c"] = "aes256-ctr,aes192-ctr,aes128-ctr"
+            config["cipher.c2s"] = "aes256-ctr,aes192-ctr,aes128-ctr"
             session.setConfig(config)
             session.timeout = SSH_TIMEOUT
 
-            Log.d("SSHAuth", "Connecting JSch to $host:$port...")
-            session.connect(SSH_TIMEOUT)  // استفاده از تایم‌اوت برای connect
+            Log.d("SSHAuth", "Connecting...")
+            session.connect(SSH_TIMEOUT)
 
             if (session.isConnected) {
-                Log.i("SSHAuth", "SSH Login Successful on $host")
                 session.disconnect()
                 AuthResult(true, "Login Successful")
             } else {
@@ -169,24 +240,117 @@ class MikroTikRepository {
             }
 
         } catch (e: Exception) {
-            Log.e("SSHAuth", "JSch Error on $host: ${e.message}")
             val errorMsg = e.message?.lowercase() ?: ""
+            Log.e("SSHAuth", "Conn Error: ${e.javaClass.simpleName}")
 
-            // منطق ترجمه خطا که درخواست کردید
             val userMessage = when {
                 errorMsg.contains("auth fail") -> "Invalid username or password"
                 errorMsg.contains("timeout") -> "Connection timed out"
-                errorMsg.contains("connection refused") -> "Connection refused (Port $port blocked)"
+                errorMsg.contains("connection refused") -> "Connection refused (Port closed)"
                 errorMsg.contains("network is unreachable") -> "Network unreachable"
-                else -> "Connection failed: ${e.message}"
+                else -> "Connection failed"
             }
             AuthResult(false, userMessage)
         } finally {
-            try {
-                session?.disconnect()
-            } catch (e: Exception) { }
+            try { session?.disconnect() } catch (e: Exception) { }
         }
     }
+
+    private fun generateStrongPassword(length: Int = 16): String {
+        val chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        val random = SecureRandom()
+        val sb = StringBuilder(length)
+        for (i in 0 until length) {
+            sb.append(chars[random.nextInt(chars.length)])
+        }
+        return sb.toString()
+    }
+
+    // --- Encryption Logic ---
+    private fun saveCredentialsSecurely(username: String, password: String) {
+        try {
+            val secretKey = getSecretKey()
+            val isM = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+            val transformation = if (isM) "AES/GCM/NoPadding" else "AES/ECB/PKCS5Padding"
+
+            val cipher = Cipher.getInstance(transformation)
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+            val ivUser = if (isM) cipher.iv else ByteArray(0)
+            val encUser = cipher.doFinal(username.toByteArray(Charsets.UTF_8))
+
+            val cipher2 = Cipher.getInstance(transformation)
+            cipher2.init(Cipher.ENCRYPT_MODE, secretKey)
+            val ivPass = if (isM) cipher2.iv else ByteArray(0)
+            val encPass = cipher2.doFinal(password.toByteArray(Charsets.UTF_8))
+
+            val editor = prefs.edit()
+                .putString(PREF_USERNAME, Base64.encodeToString(encUser, Base64.NO_WRAP))
+                .putString(PREF_PASSWORD, Base64.encodeToString(encPass, Base64.NO_WRAP))
+
+            if (isM) {
+                editor.putString(PREF_IV_USER, Base64.encodeToString(ivUser, Base64.NO_WRAP))
+                editor.putString(PREF_IV_PASS, Base64.encodeToString(ivPass, Base64.NO_WRAP))
+            }
+            editor.apply()
+        } catch (e: Exception) {
+            Log.e("MikroTikRepo", "Enc Error")
+        }
+    }
+
+    fun getSavedCredentials(): Pair<String?, String?> {
+        try {
+            val encUser = prefs.getString(PREF_USERNAME, null)
+            val encPass = prefs.getString(PREF_PASSWORD, null)
+            if (encUser == null || encPass == null) return Pair(null, null)
+
+            val secretKey = getSecretKey()
+            val isM = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+            val transformation = if (isM) "AES/GCM/NoPadding" else "AES/ECB/PKCS5Padding"
+
+            val cipher = Cipher.getInstance(transformation)
+            if (isM) {
+                val ivStr = prefs.getString(PREF_IV_USER, null) ?: return Pair(null, null)
+                val spec = GCMParameterSpec(128, Base64.decode(ivStr, Base64.NO_WRAP))
+                cipher.init(Cipher.DECRYPT_MODE, secretKey, spec)
+            } else {
+                cipher.init(Cipher.DECRYPT_MODE, secretKey)
+            }
+            val user = String(cipher.doFinal(Base64.decode(encUser, Base64.NO_WRAP)), Charsets.UTF_8)
+
+            val cipher2 = Cipher.getInstance(transformation)
+            if (isM) {
+                val ivStr = prefs.getString(PREF_IV_PASS, null) ?: return Pair(null, null)
+                val spec = GCMParameterSpec(128, Base64.decode(ivStr, Base64.NO_WRAP))
+                cipher2.init(Cipher.DECRYPT_MODE, secretKey, spec)
+            } else {
+                cipher2.init(Cipher.DECRYPT_MODE, secretKey)
+            }
+            val pass = String(cipher2.doFinal(Base64.decode(encPass, Base64.NO_WRAP)), Charsets.UTF_8)
+
+            return Pair(user, pass)
+        } catch (e: Exception) {
+            clearCredentials()
+            return Pair(null, null)
+        }
+    }
+
+    fun clearCredentials() = prefs.edit().clear().apply()
+
+    // --- توابع جدید برای انتقال یوزر (Export/Import) ---
+
+    fun exportTransferToken(): String? {
+        val (user, pass) = getSavedCredentials()
+        if (user != null && pass != null) {
+            return TokenManager.generateToken(user, pass)
+        }
+        return null
+    }
+
+    fun importTransferToken(token: String): Pair<String, String>? {
+        return TokenManager.decodeToken(token)
+    }
+
+    // --------------------------------------------------
 
     private fun parseHostAndPort(rawAddress: String): Pair<String, Int> {
         val clean = rawAddress.trim().replace("/", "").replace("http://", "").replace("https://", "")
@@ -200,50 +364,24 @@ class MikroTikRepository {
         }
     }
 
-    class NetworkBoundSocketFactory(
-        private val network: Network?,
+    class SimpleSocketFactory(
         private val connectionTimeout: Int,
         private val socketTimeout: Int
     ) : SocketFactory {
         override fun createSocket(host: String, port: Int): Socket {
-            // 1. تلاش اول: استفاده از شبکه فیزیکی
-            if (network != null) {
-                try {
-                    val socket = Socket(Proxy.NO_PROXY)
-                    network.bindSocket(socket)
-
-                    val addresses = network.getAllByName(host)
-                    val ipv4Address = addresses.firstOrNull { it is java.net.Inet4Address }
-                        ?: throw Exception("No IPv4 address found for $host")
-
-                    socket.soTimeout = socketTimeout
-                    socket.keepAlive = true
-                    socket.tcpNoDelay = true
-
-                    socket.connect(InetSocketAddress(ipv4Address, port), connectionTimeout)
-                    return socket
-
-                } catch (e: Exception) {
-                    Log.w("SSHAuth", "Direct connection failed (${e.message}). Switching to default route.")
-                }
-            }
-
-            // 2. تلاش دوم (Fallback): اتصال استاندارد
-            // اگر VPN روشن باشد از VPN می‌رود، اگر خاموش باشد از نت معمولی تلاش می‌کند.
-            val fallbackSocket = Socket(Proxy.NO_PROXY)
+            val socket = Socket()
             try {
-                val fallbackAddress = InetAddress.getAllByName(host).firstOrNull { it is java.net.Inet4Address }
-                    ?: InetAddress.getByName(host)
-
-                fallbackSocket.soTimeout = socketTimeout
-                fallbackSocket.connect(InetSocketAddress(fallbackAddress, port), connectionTimeout)
-                return fallbackSocket
+                val address = InetAddress.getByName(host)
+                socket.soTimeout = socketTimeout
+                socket.keepAlive = true
+                socket.tcpNoDelay = true
+                socket.connect(InetSocketAddress(address, port), connectionTimeout)
+                return socket
             } catch (e: Exception) {
-                Log.e("SSHAuth", "System Route connection also failed: ${e.message}")
+                try { socket.close() } catch (ignored: Exception) {}
                 throw e
             }
         }
-
         override fun getInputStream(socket: Socket): InputStream = socket.getInputStream()
         override fun getOutputStream(socket: Socket): OutputStream = socket.getOutputStream()
     }

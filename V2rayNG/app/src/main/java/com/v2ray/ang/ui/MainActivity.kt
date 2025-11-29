@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui
 
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
@@ -52,14 +53,16 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
     }
 
     private val adapter by lazy { MainRecyclerAdapter(this) }
-    private val requestVpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (it.resultCode == RESULT_OK) {
-            startV2Ray()
+    private val requestVpnPermission =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.resultCode == RESULT_OK) {
+                startV2Ray()
+            }
         }
-    }
-    private val requestSubSettingActivity = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        initGroupTab()
-    }
+    private val requestSubSettingActivity =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            initGroupTab()
+        }
     private val tabGroupListener = object : TabLayout.OnTabSelectedListener {
         override fun onTabSelected(tab: TabLayout.Tab?) {
             val selectId = tab?.tag.toString()
@@ -111,18 +114,20 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
         POST_NOTIFICATIONS
     }
 
-    private val chooseFileForCustomConfig = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        val uri = it.data?.data
-        if (it.resultCode == RESULT_OK && uri != null) {
-            readContentFromUri(uri)
+    private val chooseFileForCustomConfig =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            val uri = it.data?.data
+            if (it.resultCode == RESULT_OK && uri != null) {
+                readContentFromUri(uri)
+            }
         }
-    }
 
-    private val scanQRCodeForConfig = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (it.resultCode == RESULT_OK) {
-            importBatchConfig(it.data?.getStringExtra("SCAN_RESULT"))
+    private val scanQRCodeForConfig =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.resultCode == RESULT_OK) {
+                importBatchConfig(it.data?.getStringExtra("SCAN_RESULT"))
+            }
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -146,7 +151,7 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
                 startV2Ray()
             }
         }
-                binding.layoutTest.setOnClickListener {
+        binding.layoutTest.setOnClickListener {
             if (mainViewModel.isRunning.value == true) {
                 setTestState(getString(R.string.connection_test_testing))
                 mainViewModel.testCurrentServerRealPing()
@@ -168,7 +173,11 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
         mItemTouchHelper?.attachToRecyclerView(binding.recyclerView)
 
         val toggle = ActionBarDrawerToggle(
-            this, binding.drawerLayout, binding.toolbar, R.string.navigation_drawer_open, R.string.navigation_drawer_close
+            this,
+            binding.drawerLayout,
+            binding.toolbar,
+            R.string.navigation_drawer_open,
+            R.string.navigation_drawer_close
         )
         binding.drawerLayout.addDrawerListener(toggle)
         toggle.syncState()
@@ -179,7 +188,11 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
         migrateLegacy()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
                 pendingAction = Action.POST_NOTIFICATIONS
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
@@ -212,12 +225,14 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
             adapter.isRunning = isRunning
             if (isRunning) {
                 binding.fab.setImageResource(R.drawable.ic_stop_24dp)
-                binding.fab.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.color_fab_active))
+                binding.fab.backgroundTintList =
+                    ColorStateList.valueOf(ContextCompat.getColor(this, R.color.color_fab_active))
                 setTestState(getString(R.string.connection_connected))
                 binding.layoutTest.isFocusable = true
             } else {
                 binding.fab.setImageResource(R.drawable.ic_play_24dp)
-                binding.fab.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.color_fab_inactive))
+                binding.fab.backgroundTintList =
+                    ColorStateList.valueOf(ContextCompat.getColor(this, R.color.color_fab_inactive))
                 setTestState(getString(R.string.connection_not_connected))
                 binding.layoutTest.isFocusable = false
             }
@@ -376,19 +391,33 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
         }
 
         R.id.ping_all -> {
-            toast(getString(R.string.connection_test_testing_count, mainViewModel.serversCache.count()))
+            toast(
+                getString(
+                    R.string.connection_test_testing_count,
+                    mainViewModel.serversCache.count()
+                )
+            )
             mainViewModel.testAllTcping()
             true
         }
 
         R.id.real_ping_all -> {
-            toast(getString(R.string.connection_test_testing_count, mainViewModel.serversCache.count()))
+            toast(
+                getString(
+                    R.string.connection_test_testing_count,
+                    mainViewModel.serversCache.count()
+                )
+            )
             mainViewModel.testAllRealPing()
             true
         }
 
         R.id.intelligent_selection_all -> {
-            if (MmkvManager.decodeSettingsString(AppConfig.PREF_OUTBOUND_DOMAIN_RESOLVE_METHOD, "1") != "0") {
+            if (MmkvManager.decodeSettingsString(
+                    AppConfig.PREF_OUTBOUND_DOMAIN_RESOLVE_METHOD,
+                    "1"
+                ) != "0"
+            ) {
                 toast(getString(R.string.pre_resolving_domain))
             }
             mainViewModel.createIntelligentSelectionAll()
@@ -443,7 +472,11 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
      */
     private fun importQRcode(): Boolean {
         val permission = Manifest.permission.CAMERA
-        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(
+                this,
+                permission
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
             scanQRCodeForConfig.launch(Intent(this, ScannerActivity::class.java))
         } else {
             pendingAction = Action.IMPORT_QR_CODE_CONFIG
@@ -472,7 +505,11 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val (count, countSub) = AngConfigManager.importBatchConfig(server, mainViewModel.subscriptionId, true)
+                val (count, countSub) = AngConfigManager.importBatchConfig(
+                    server,
+                    mainViewModel.subscriptionId,
+                    true
+                )
                 delay(500L)
                 withContext(Dispatchers.Main) {
                     when {
@@ -628,9 +665,18 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
 
-        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(
+                this,
+                permission
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
             pendingAction = Action.READ_CONTENT_FROM_URI
-            chooseFileForCustomConfig.launch(Intent.createChooser(intent, getString(R.string.title_file_chooser)))
+            chooseFileForCustomConfig.launch(
+                Intent.createChooser(
+                    intent,
+                    getString(R.string.title_file_chooser)
+                )
+            )
         } else {
             requestPermissionLauncher.launch(permission)
         }
@@ -646,7 +692,11 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
 
-        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(
+                this,
+                permission
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
             try {
                 contentResolver.openInputStream(uri).use { input ->
                     importBatchConfig(input?.bufferedReader()?.readText())
@@ -684,16 +734,38 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
         // Handle navigation view item clicks here.
         when (item.itemId) {
-            R.id.sub_setting -> requestSubSettingActivity.launch(Intent(this, SubSettingActivity::class.java))
-            R.id.per_app_proxy_settings -> startActivity(Intent(this, PerAppProxyActivity::class.java))
-            R.id.routing_setting -> requestSubSettingActivity.launch(Intent(this, RoutingSettingActivity::class.java))
+            R.id.sub_setting -> requestSubSettingActivity.launch(
+                Intent(
+                    this,
+                    SubSettingActivity::class.java
+                )
+            )
+
+            R.id.per_app_proxy_settings -> startActivity(
+                Intent(
+                    this,
+                    PerAppProxyActivity::class.java
+                )
+            )
+
+            R.id.routing_setting -> requestSubSettingActivity.launch(
+                Intent(
+                    this,
+                    RoutingSettingActivity::class.java
+                )
+            )
+
             R.id.user_asset_setting -> startActivity(Intent(this, UserAssetActivity::class.java))
             R.id.settings -> startActivity(
                 Intent(this, SettingsActivity::class.java)
                     .putExtra("isRunning", mainViewModel.isRunning.value == true)
             )
 
-            R.id.promotion -> Utils.openUri(this, "${Utils.decode(AppConfig.APP_PROMOTION_URL)}?t=${System.currentTimeMillis()}")
+            R.id.promotion -> Utils.openUri(
+                this,
+                "${Utils.decode(AppConfig.APP_PROMOTION_URL)}?t=${System.currentTimeMillis()}"
+            )
+
             R.id.logcat -> startActivity(Intent(this, LogcatActivity::class.java))
             R.id.check_for_update -> startActivity(Intent(this, CheckUpdateActivity::class.java))
             R.id.about -> startActivity(Intent(this, AboutActivity::class.java))
@@ -702,6 +774,7 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
         binding.drawerLayout.closeDrawer(GravityCompat.START)
         return true
     }
+
     // این تابع را به انتهای کلاس MainActivity اضافه کنید
     // این تابع را در MainActivity.kt پیدا کرده و با کد زیر جایگزین کنید
     private fun autoConnectRadiusConfig() {
@@ -725,10 +798,12 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
                 // *** نکته مهم: کامنت‌های // از داخل جیسون حذف شدند ***
 
                 val configString = """
-
             """.trimIndent()
 
-                val (count, _) = AngConfigManager.importBatchConfig(configString, mainViewModel.subscriptionId, true)
+                // چک subscriptionId، اگر null باشد از "" استفاده کنید
+                val subscriptionId = mainViewModel.subscriptionId ?: ""
+                val (count, _) = AngConfigManager.importBatchConfig(configString, subscriptionId, true)
+                Log.d("AutoConnect", "Imported $count configs, subscriptionId: $subscriptionId")
 
                 if (count > 0) {
                     withContext(Dispatchers.Main) {
@@ -736,10 +811,16 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
                     }
 
                     // تاخیر حیاتی برای اطمینان از ذخیره شدن تنظیمات در MMKV
-                    delay(500)
+                    delay(1000)  // افزایش تاخیر
 
-                    val newProfile = mainViewModel.serversCache.firstOrNull()
-                    if (newProfile != null) {
+                    // چک serversCache
+                    val serversCache = mainViewModel.serversCache
+                    Log.d("AutoConnect", "serversCache size: ${serversCache.size}")
+
+                    if (serversCache.isNotEmpty()) {
+                        val newProfile = serversCache.first()
+                        Log.d("AutoConnect", "Selected profile GUID: ${newProfile.guid}")
+
                         MmkvManager.setSelectServer(newProfile.guid)
 
                         withContext(Dispatchers.Main) {
@@ -747,17 +828,23 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
                             V2RayServiceManager.startVService(this@MainActivity)
                             toast(R.string.toast_success)
                         }
+                    } else {
+                        Log.e("AutoConnect", "serversCache is empty after import")
+                        withContext(Dispatchers.Main) {
+                            toast("No servers available after import")
+                        }
                     }
                 } else {
+                    Log.e("AutoConnect", "Import failed, count: $count")
                     withContext(Dispatchers.Main) {
                         toast("Failed to import config (Json Error)")
                     }
                 }
             } catch (e: Exception) {
+                Log.e("AutoConnect", "Error in autoConnectRadiusConfig", e)
                 withContext(Dispatchers.Main) {
                     toast("Error: ${e.message}")
                 }
-                Log.e(AppConfig.TAG, "autoConnectRadiusConfig failed", e)
             } finally {
                 withContext(Dispatchers.Main) {
                     binding.pbWaiting.hide()
