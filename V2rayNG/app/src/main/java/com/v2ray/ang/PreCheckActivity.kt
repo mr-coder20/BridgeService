@@ -19,10 +19,14 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
+import androidx.lifecycle.distinctUntilChanged  // اضافه کردم برای جلوگیری از آپدیت‌های غیرضروری
 import com.v2ray.ang.data.UpdateInfo
 import com.v2ray.ang.ui.MainActivity
 import com.v2ray.ang.viewmodel.PreCheckEvent
 import com.v2ray.ang.viewmodel.PreCheckViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 
 class PreCheckActivity : AppCompatActivity() {
 
@@ -71,17 +75,25 @@ class PreCheckActivity : AppCompatActivity() {
 
     private fun setupListeners() {
         btnLogin.setOnClickListener {
-            viewModel.authenticate(
-                this,
-                edtUsername.text.toString(),
-                edtPassword.text.toString()
-            )
+            // استفاده از lifecycleScope برای اجرای سریع‌تر
+            lifecycleScope.launch(Dispatchers.Main) {
+                viewModel.authenticate(
+                    this@PreCheckActivity,
+                    edtUsername.text.toString(),
+                    edtPassword.text.toString()
+                )
+            }
         }
-        btnClear.setOnClickListener { viewModel.clearCredentials() }
+        btnClear.setOnClickListener {
+            lifecycleScope.launch(Dispatchers.Main) {
+                viewModel.clearCredentials()
+            }
+        }
     }
 
     private fun observeViewModel() {
-        viewModel.uiState.observe(this) { state ->
+        // اضافه کردم distinctUntilChanged برای جلوگیری از آپدیت‌های تکراری و سرعت بالاتر
+        viewModel.uiState.distinctUntilChanged().observe(this) { state ->
             progressCheckNetwork.isVisible = state.isNetworkCheckInProgress
             progressLogin.isVisible = state.isLoginInProgress
             loginContainer.isVisible = state.isLoginContainerVisible
@@ -95,7 +107,8 @@ class PreCheckActivity : AppCompatActivity() {
             txtStatus.text = state.statusMessage
         }
 
-        viewModel.events.observe(this) { event ->
+        // اضافه کردم distinctUntilChanged برای جلوگیری از آپدیت‌های تکراری
+        viewModel.events.distinctUntilChanged().observe(this) { event ->
             event.getContentIfNotHandled()?.let { eventContent ->
                 when (eventContent) {
                     is PreCheckEvent.AuthenticationSuccess -> checkPermissionsAndProceed()
@@ -179,9 +192,12 @@ class PreCheckActivity : AppCompatActivity() {
     }
 
     private fun navigateToMainActivity() {
-        txtStatus.text = "Permissions granted. Redirecting..."
+        // حذف آپدیت txtStatus برای سرعت بالاتر (اختیاری، اگر آپدیت کند باشد)
+        // txtStatus.text = "Permissions granted. Redirecting..."
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("AUTO_CONNECT_RADIUS", true)
+            // اضافه کردم FLAG_ACTIVITY_CLEAR_TOP برای ناوبری سریع‌تر
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         startActivity(intent)
         finish()

@@ -53,8 +53,8 @@ class NetworkConnectivityChecker {
                     !config.routerIps.isNullOrEmpty()     // لیست روتر نباید خالی باشد
         }
 
-        // تلاش ۱: لینک اصلی (GitLab)
-        val tempConfig1 = fetchJsonFromUrl(primaryUrl)
+        // تلاش ۱: لینک اصلی (GitLab) - کاهش تایم‌اوت برای سرعت
+        val tempConfig1 = fetchJsonFromUrl(primaryUrl, connectTimeout = 5000, readTimeout = 5000)  // کاهش از 15000 به 5000
         if (isValidConfig(tempConfig1)) {
             fetchedConfig = tempConfig1
             connectionStatus = "Connected (Via GitLab)"
@@ -62,8 +62,8 @@ class NetworkConnectivityChecker {
         } else {
             Log.w("NetworkCheck", "GitLab failed or config was invalid/empty. Trying Gist...")
 
-            // تلاش ۲: لینک پشتیبان (Gist)
-            val tempConfig2 = fetchJsonFromUrl(fallbackUrl)
+            // تلاش ۲: لینک پشتیبان (Gist) - کاهش تایم‌اوت برای سرعت
+            val tempConfig2 = fetchJsonFromUrl(fallbackUrl, connectTimeout = 5000, readTimeout = 5000)  // کاهش از 15000 به 5000
             if (isValidConfig(tempConfig2)) {
                 fetchedConfig = tempConfig2
                 connectionStatus = "Connected (Via Gist)"
@@ -83,8 +83,9 @@ class NetworkConnectivityChecker {
 
     /**
      * دانلود و پارس کردن JSON از یک لینک مشخص
+     * پارامترهای تایم‌اوت را اضافه کردم برای تنظیم پویا
      */
-    private fun fetchJsonFromUrl(urlString: String): AppConfig? {
+    private fun fetchJsonFromUrl(urlString: String, connectTimeout: Int = 15000, readTimeout: Int = 15000): AppConfig? {
         return try {
             val urlWithNoCache = "$urlString?t=${System.currentTimeMillis()}"
             val url = URL(urlWithNoCache)
@@ -92,8 +93,8 @@ class NetworkConnectivityChecker {
 
             connection.apply {
                 requestMethod = "GET"
-                connectTimeout = 15000
-                readTimeout = 15000
+                this.connectTimeout = connectTimeout
+                this.readTimeout = readTimeout
                 useCaches = false
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")

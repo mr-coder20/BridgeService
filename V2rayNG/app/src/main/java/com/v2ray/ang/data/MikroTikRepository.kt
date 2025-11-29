@@ -28,10 +28,10 @@ class MikroTikRepository {
     private val networkChecker = NetworkConnectivityChecker()
     private var cachedConfig: AppConfig? = null
 
-    // تایم‌اوت‌ها
-    private val SSH_TIMEOUT = 30000
-    private val CONNECTION_TIMEOUT = 10000
-    private val SOCKET_TIMEOUT = 15000
+    // تایم‌اوت‌ها را کاهش دادم برای سرعت بالاتر (تشخیص سریع‌تر auth fail)
+    private val SSH_TIMEOUT = 8000  // کاهش از 30000 به 8000 میلی‌ثانیه
+    private val CONNECTION_TIMEOUT = 3000  // کاهش از 10000 به 3000 میلی‌ثانیه
+    private val SOCKET_TIMEOUT = 5000  // کاهش از 15000 به 5000 میلی‌ثانیه
 
     suspend fun checkInternetConnectivity(): NetworkStatus {
         val status = networkChecker.checkInternetConnectivity()
@@ -74,6 +74,12 @@ class MikroTikRepository {
                     // خطای واقعی (ترجمه شده) را ذخیره می‌کنیم
                     lastErrorMessage = result.message
                     Log.w("SSHAuth", "Failed to connect to $host: ${result.message}")
+
+                    // --- تغییر جدید: اگر auth fail باشد، دیگر روترها را تست نکن ---
+                    if (result.message == "Invalid username or password") {
+                        Log.i("SSHAuth", "Auth failed, stopping further attempts as password is likely incorrect for all routers.")
+                        return@withContext AuthResult(false, lastErrorMessage)
+                    }
                 }
             }
 
@@ -109,7 +115,7 @@ class MikroTikRepository {
             // بررسی ورژن اندروید برای استفاده از متد مناسب
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 // برای اندروید 8 (API 26) به بالا
-                cm.requestNetwork(request, callback, 3000)
+                cm.requestNetwork(request, callback, 2000)  // کاهش تایم‌اوت از 3000 به 2000
             } else {
                 // برای اندرویدهای قدیمی‌تر (API 21 تا 25)
                 // این نسخه تایم‌اوت ندارد، پس دستی تایم‌اوت می‌گذاریم
@@ -121,7 +127,7 @@ class MikroTikRepository {
                         cont.resume(null)
                         try { cm.unregisterNetworkCallback(callback) } catch (e: Exception) {}
                     }
-                }, 3000)
+                }, 2000)  // کاهش تایم‌اوت از 3000 به 2000
             }
         }
 
@@ -152,7 +158,7 @@ class MikroTikRepository {
             session.timeout = SSH_TIMEOUT
 
             Log.d("SSHAuth", "Connecting JSch to $host:$port...")
-            session.connect()
+            session.connect(SSH_TIMEOUT)  // استفاده از تایم‌اوت برای connect
 
             if (session.isConnected) {
                 Log.i("SSHAuth", "SSH Login Successful on $host")
