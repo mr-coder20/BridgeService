@@ -19,9 +19,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
-import com.v2ray.ang.data.UpdateInfo // <-- اصلاح ۱: وارد کردن کلاس صحیح
+import com.v2ray.ang.data.UpdateInfo
 import com.v2ray.ang.ui.MainActivity
-import com.v2ray.ang.util.Event
 import com.v2ray.ang.viewmodel.PreCheckEvent
 import com.v2ray.ang.viewmodel.PreCheckViewModel
 
@@ -34,7 +33,6 @@ class PreCheckActivity : AppCompatActivity() {
     private lateinit var btnLogin: Button
     private lateinit var btnClear: Button
     private lateinit var txtStatus: TextView
-    private lateinit var txtLocalIp: TextView
     private lateinit var progressCheckNetwork: ProgressBar
     private lateinit var progressLogin: ProgressBar
     private lateinit var loginContainer: android.view.View
@@ -74,7 +72,7 @@ class PreCheckActivity : AppCompatActivity() {
     private fun setupListeners() {
         btnLogin.setOnClickListener {
             viewModel.authenticate(
-                this, // <-- اصلاح: اضافه کردن context
+                this,
                 edtUsername.text.toString(),
                 edtPassword.text.toString()
             )
@@ -110,27 +108,29 @@ class PreCheckActivity : AppCompatActivity() {
                     is PreCheckEvent.ShowToast -> {
                         Toast.makeText(this, eventContent.message, Toast.LENGTH_SHORT).show()
                     }
-                    is PreCheckEvent.ShowUpdateDialog -> showUpdateDialog(eventContent.updateInfo) // <-- اصلاح ۳: استفاده از نام متغیر صحیح
+                    is PreCheckEvent.ShowUpdateDialog -> showUpdateDialog(eventContent.updateInfo)
+
+                    // --- تغییر جدید: هندل کردن بسته شدن برنامه ---
+                    is PreCheckEvent.CloseApp -> {
+                        finishAffinity() // بستن کامل برنامه
+                    }
                 }
             }
         }
     }
 
     private fun showUpdateDialog(info: UpdateInfo) {
-        // جلوگیری از کرش در صورت بسته بودن اکتیویتی
         if (isFinishing || isDestroyed) return
 
         val builder = AlertDialog.Builder(this)
             .setTitle("New Version Available (${info.versionName})")
             .setMessage(info.releaseNotes)
-            .setCancelable(false) // جلوگیری از بستن با کلیک بیرون دیالوگ
+            .setCancelable(false)
 
-        // دکمه دانلود برای هر دو حالت مشترک است
         builder.setPositiveButton("Download") { _, _ ->
             try {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.updateUrl))
                 startActivity(intent)
-                // اگر اجباری باشد، بعد از زدن دانلود هم برنامه را می‌بندیم تا کاربر تا آپدیت نکند نتواند استفاده کند
                 if (info.isForced) {
                     finishAffinity()
                 }
@@ -140,23 +140,16 @@ class PreCheckActivity : AppCompatActivity() {
         }
 
         if (info.isForced) {
-            // --- حالت اجباری ---
             builder.setTitle("Update Required (${info.versionName})")
             builder.setMessage("A mandatory update is required to continue.\n\nChanges:\n${info.releaseNotes}")
-
-            // دکمه خروج کامل از برنامه
             builder.setNegativeButton("Exit App") { dialog, _ ->
                 dialog.dismiss()
-                finishAffinity() // بستن کامل برنامه و همه اکتیویتی‌ها
+                finishAffinity()
             }
         } else {
-            // --- حالت اختیاری ---
             builder.setMessage("A new version is available.\n\nChanges:\n${info.releaseNotes}")
-
-            // دکمه ادامه دادن بدون آپدیت
             builder.setNegativeButton("Continue / Later") { dialog, _ ->
                 dialog.dismiss()
-                // کاربر می‌تواند با فرم لاگین کار کند
             }
         }
 

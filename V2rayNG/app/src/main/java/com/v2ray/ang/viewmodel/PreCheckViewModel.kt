@@ -1,7 +1,7 @@
 package com.v2ray.ang.viewmodel
 
 import android.content.Context
-import android.util.Log // <--- وارد کردن کلاس Log
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
@@ -10,6 +10,7 @@ import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.data.MikroTikRepository
 import com.v2ray.ang.data.UpdateInfo
 import com.v2ray.ang.util.Event
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class PreCheckViewModel : ViewModel() {
@@ -47,10 +48,9 @@ class PreCheckViewModel : ViewModel() {
 
             // 2. شروع بررسی آپدیت
             _uiState.value = _uiState.value?.copy(statusMessage = "Checking for updates...")
-            val config = repository.checkForUpdates()
+            val config = networkStatus.config
 
             // دریافت نسخه فعلی برنامه
-            // نکته: اگر در حالت Debug هستید ممکن است versionCode عدد 1 باشد. فایل build.gradle را چک کنید.
             val currentVersionCode = BuildConfig.VERSION_CODE.toLong()
 
             Log.d("UpdateCheck", "App Version: $currentVersionCode")
@@ -72,12 +72,11 @@ class PreCheckViewModel : ViewModel() {
                         )
                     ))
 
-                    // در آپدیت اجباری، صفحه لاگین را نمایش نمی‌دهیم و پراگرس را متوقف می‌کنیم
                     _uiState.value = _uiState.value?.copy(
                         isNetworkCheckInProgress = false,
                         statusMessage = "Update Required"
                     )
-                    return@launch // خروج از تابع (کاربر حق ندارد ادامه دهد)
+                    return@launch
 
                 } else if (currentVersionCode < config.latestVersionCode) {
                     // --- آپدیت اختیاری ---
@@ -91,7 +90,6 @@ class PreCheckViewModel : ViewModel() {
                             updateUrl = config.updateUrl
                         )
                     ))
-                    // در آپدیت اختیاری، کد ادامه پیدا می‌کند تا صفحه لاگین زیر دیالوگ نمایش داده شود
                 } else {
                     Log.d("UpdateCheck", "Status: NO UPDATE NEEDED")
                 }
@@ -99,7 +97,7 @@ class PreCheckViewModel : ViewModel() {
                 Log.w("UpdateCheck", "Config was NULL. Skipping update check.")
             }
 
-            // 3. نمایش صفحه لاگین (اگر آپدیت اجباری نبود)
+            // 3. نمایش صفحه لاگین
             _uiState.value = _uiState.value?.copy(
                 isNetworkCheckInProgress = false,
                 statusMessage = "Please enter your credentials.",
@@ -108,18 +106,27 @@ class PreCheckViewModel : ViewModel() {
         }
     }
 
-    // ... بقیه توابع ViewModel بدون تغییر باقی می‌مانند ...
     fun authenticate(context: Context, user: String, pass: String) {
         if (user.isBlank() || pass.isBlank()) {
             _uiState.value = _uiState.value?.copy(statusMessage = "Username and password cannot be empty.")
             return
         }
         viewModelScope.launch {
-            _uiState.value = _uiState.value?.copy(isLoginInProgress = true, statusMessage = "Authenticating...")
-            val result = repository.authenticateWebView(context, user, pass)
+            _uiState.value = _uiState.value?.copy(isLoginInProgress = true, statusMessage = "Authenticating via SSH...")
+
+            // --- تغییر اصلی: استفاده از authenticateSsh ---
+            val result = repository.authenticateSsh(context, user, pass)
+
             _uiState.value = _uiState.value?.copy(isLoginInProgress = false, statusMessage = result.message)
+
             if (result.success) {
                 _events.value = Event(PreCheckEvent.AuthenticationSuccess)
+            } else if (result.message == "CONFIG_MISSING") {
+                // --- مدیریت حالت اضطراری (نبودن کانفیگ و آدرس) ---
+                _events.value = Event(PreCheckEvent.ShowToast("Network configuration missing. Please try again later."))
+                // کمی تاخیر تا کاربر پیام را ببیند
+                delay(1500)
+                _events.value = Event(PreCheckEvent.CloseApp)
             }
         }
     }
@@ -162,6 +169,7 @@ sealed class PreCheckEvent {
     object RequestVpnPermission : PreCheckEvent()
     object NavigateToMain : PreCheckEvent()
     object ClearFields : PreCheckEvent()
+    object CloseApp : PreCheckEvent() // <--- رویداد جدید برای بستن برنامه
     data class ShowToast(val message: String) : PreCheckEvent()
     data class ShowUpdateDialog(val updateInfo: UpdateInfo) : PreCheckEvent()
 }
