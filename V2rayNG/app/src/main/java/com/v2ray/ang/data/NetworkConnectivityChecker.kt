@@ -17,7 +17,6 @@ data class AppConfig(
     val minRequiredVersionCode: Long,
     val updateUrl: String,
     val releaseNotes: String,
-    // تغییر: به جای یک رشته، حالا لیستی از آدرس‌های روتر داریم
     val routerIps: List<String>? = null,
     val configList: List<String>? = null
 )
@@ -30,63 +29,83 @@ data class NetworkStatus(
     val config: AppConfig?
 )
 
+// کلاس کمکی برای نتیجه دانلود
+data class FetchResult(
+    val config: AppConfig?,
+    val isNetworkSuccessful: Boolean // آیا اتصال به سرور موفق بود؟ (صرف نظر از محتوای فایل)
+)
+
 class NetworkConnectivityChecker {
 
     private val gson = Gson()
 
     /**
      * بررسی اتصال اینترنت با تلاش برای دانلود تنظیمات.
-     * شرط موفقیت: دانلود موفقیت‌آمیز JSON + وجود داشتن لیست کانفیگ و لیست روترها در آن.
      */
     suspend fun checkInternetConnectivity(): NetworkStatus = withContext(Dispatchers.IO) {
-        // اولویت‌ها (گیت‌لب اول چون در شبکه شما بهتر جواب داد)
+        // اولویت‌ها
         val primaryUrl = "https://gitlab.com/-/snippets/4908237/raw/main/raw"
         val fallbackUrl = "https://gist.githubusercontent.com/mr-coder20/33e88c9783202c52b7654886b2619147/raw"
 
-        var fetchedConfig: AppConfig? = null
-        var connectionStatus = "Connection Failed"
+        var finalConfig: AppConfig? = null
+        var statusMessage = ""
+        var atLeastOneServerReached = false // فلگ برای بررسی اینکه آیا اصلا به سرور وصل شدیم یا نه
 
-        // تابع کمکی برای بررسی اینکه آیا جیسون معتبر است یا خیر
+        // تابع کمکی برای بررسی اعتبار کانفیگ
         fun isValidConfig(config: AppConfig?): Boolean {
             return config != null &&
-                    !config.configList.isNullOrEmpty() && // لیست کانفیگ نباید خالی باشد
-                    !config.routerIps.isNullOrEmpty()     // لیست روتر نباید خالی باشد
+                    !config.configList.isNullOrEmpty() &&
+                    !config.routerIps.isNullOrEmpty()
         }
 
-        // تلاش ۱: لینک اصلی (GitLab) - کاهش تایم‌اوت برای سرعت
-        val tempConfig1 = fetchJsonFromUrl(primaryUrl, connectTimeout = 5000, readTimeout = 5000)  // کاهش از 15000 به 5000
-        if (isValidConfig(tempConfig1)) {
-            fetchedConfig = tempConfig1
-            connectionStatus = "Connected (Via GitLab)"
+        // تلاش ۱: لینک اصلی (GitLab)
+        val result1 = fetchJsonFromUrl(primaryUrl, connectTimeout = 5000, readTimeout = 5000)
+        if (result1.isNetworkSuccessful) atLeastOneServerReached = true
+
+        if (isValidConfig(result1.config)) {
+            finalConfig = result1.config
+            statusMessage = "Connected (Via GitLab)"
             Log.i("NetworkCheck", "Valid config loaded from GitLab.")
         } else {
-            Log.w("NetworkCheck", "GitLab failed or config was invalid/empty. Trying Gist...")
+            Log.w("NetworkCheck", "GitLab failed or config invalid. Trying Gist...")
 
-            // تلاش ۲: لینک پشتیبان (Gist) - کاهش تایم‌اوت برای سرعت
-            val tempConfig2 = fetchJsonFromUrl(fallbackUrl, connectTimeout = 5000, readTimeout = 5000)  // کاهش از 15000 به 5000
-            if (isValidConfig(tempConfig2)) {
-                fetchedConfig = tempConfig2
-                connectionStatus = "Connected (Via Gist)"
+            // تلاش ۲: لینک پشتیبان (Gist)
+            val result2 = fetchJsonFromUrl(fallbackUrl, connectTimeout = 5000, readTimeout = 5000)
+            if (result2.isNetworkSuccessful) atLeastOneServerReached = true
+
+            if (isValidConfig(result2.config)) {
+                finalConfig = result2.config
+                statusMessage = "Connected (Via Gist)"
                 Log.i("NetworkCheck", "Valid config loaded from Gist.")
+            }
+        }
+
+        // تصمیم‌گیری نهایی برای پیام خطا
+        if (finalConfig == null) {
+            statusMessage = if (atLeastOneServerReached) {
+                // به اینترنت وصل شدیم ولی جیسون ناقص بود (کانفیگ یا روتر نداشت)
+                "سرور درحال بروز رسانی است، چند دقیقه دیگر تلاش کنید"
             } else {
-                Log.e("NetworkCheck", "Both URLs failed or returned invalid config.")
+                // کلا نتوانستیم به هیچ سروری وصل شویم
+                "شبکه در دسترس نیست"
             }
         }
 
         NetworkStatus(
-            isReachable = fetchedConfig != null, // فقط اگر کانفیگ معتبر گرفتیم true می‌شود
-            pingStatus = connectionStatus,
+            isReachable = finalConfig != null,
+            pingStatus = statusMessage,
             localIp = getLocalIpAddress(),
-            config = fetchedConfig
+            config = finalConfig
         )
     }
 
     /**
-     * دانلود و پارس کردن JSON از یک لینک مشخص
-     * پارامترهای تایم‌اوت را اضافه کردم برای تنظیم پویا
+     * دانلود و پارس کردن JSON
+     * خروجی: یک آبجکت FetchResult که شامل کانفیگ (در صورت موفقیت) و وضعیت شبکه است.
      */
-    private fun fetchJsonFromUrl(urlString: String, connectTimeout: Int = 15000, readTimeout: Int = 15000): AppConfig? {
+    private fun fetchJsonFromUrl(urlString: String, connectTimeout: Int, readTimeout: Int): FetchResult {
         return try {
+            // اضافه کردن پارامتر زمان برای جلوگیری از کش شدن
             val urlWithNoCache = "$urlString?t=${System.currentTimeMillis()}"
             val url = URL(urlWithNoCache)
             val connection = url.openConnection() as HttpURLConnection
@@ -95,42 +114,56 @@ class NetworkConnectivityChecker {
                 requestMethod = "GET"
                 this.connectTimeout = connectTimeout
                 this.readTimeout = readTimeout
-                useCaches = false
+                useCaches = false // جلوگیری از کش
+                defaultUseCaches = false
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+                setRequestProperty("Pragma", "no-cache")
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Connection", "close")
             }
 
             val responseCode = connection.responseCode
             if (responseCode == HttpURLConnection.HTTP_OK) {
+                // اتصال موفق بوده است (Network Successful = true)
                 val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
                 connection.disconnect()
-                // اگر جیسون ناقص باشد Gson نال برمی‌گرداند یا کرش نمی‌کند، اما در تابع بالا بررسی می‌کنیم که لیست‌ها پر باشند
-                gson.fromJson(jsonText, AppConfig::class.java)
+
+                try {
+                    val config = gson.fromJson(jsonText, AppConfig::class.java)
+                    FetchResult(config, isNetworkSuccessful = true)
+                } catch (e: Exception) {
+                    // جیسون خراب است اما شبکه وصل بوده
+                    Log.e("NetworkCheck", "JSON parsing error: ${e.message}")
+                    FetchResult(null, isNetworkSuccessful = true)
+                }
             } else {
                 Log.w("NetworkCheck", "Failed to connect to $urlString. Response Code: $responseCode")
                 connection.disconnect()
-                null
+                // سرور پاسخ داد اما 200 نبود (مثلا 404 یا 500) -> باز هم شبکه وصل بوده اما نتیجه نگرفتیم
+                // اگر بخواهید ارورهای 404 را هم به عنوان "شبکه در دسترس نیست" در نظر بگیرید، اینجا را false کنید.
+                // اما معمولاً کد غیر 200 یعنی سرور هست ولی فایل نیست (پس سرور در حال آپدیت است).
+                FetchResult(null, isNetworkSuccessful = true)
             }
         } catch (e: Exception) {
             Log.e("NetworkCheck", "Error fetching from $urlString: ${e.message}")
-            null
+            // خطا در اتصال (تایم اوت یا قطعی نت)
+            FetchResult(null, isNetworkSuccessful = false)
         }
     }
 
-    // توابع کمکی دیگر بدون تغییر...
+    // توابع کمکی دیگر
     fun isUrlReachable(urlString: String, timeout: Int): Boolean {
         return try {
             val url = URL(urlString)
             val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
             connection.connectTimeout = timeout
             connection.readTimeout = timeout
             connection.useCaches = false
-            val responseCode = connection.responseCode
+            val code = connection.responseCode
             connection.disconnect()
-            responseCode == HttpURLConnection.HTTP_OK
+            code == HttpURLConnection.HTTP_OK
         } catch (e: Exception) {
             false
         }

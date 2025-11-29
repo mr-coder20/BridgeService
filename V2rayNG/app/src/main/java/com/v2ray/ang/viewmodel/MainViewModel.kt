@@ -58,8 +58,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Called when the ViewModel is cleared.
      */
+    fun stopListenBroadcast() {
+        try {
+            getApplication<AngApplication>().unregisterReceiver(mMsgReceiver)
+        } catch (e: IllegalArgumentException) {
+            // Receiver was not registered or already unregistered. Ignore to prevent crash.
+        }
+    }
     override fun onCleared() {
-        getApplication<AngApplication>().unregisterReceiver(mMsgReceiver)
+        // Use the safe unregister method
+        stopListenBroadcast()
         tcpingTestScope.coroutineContext[Job]?.cancelChildren()
         SpeedtestManager.closeAllTcpSockets()
         Log.i(AppConfig.TAG, "Main ViewModel is cleared")

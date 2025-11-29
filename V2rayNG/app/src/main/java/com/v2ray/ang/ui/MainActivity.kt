@@ -30,6 +30,7 @@ import com.google.android.material.navigation.NavigationView
 import com.google.android.material.tabs.TabLayout
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.VPN
+import com.v2ray.ang.PreCheckActivity
 import com.v2ray.ang.R
 import com.v2ray.ang.databinding.ActivityMainBinding
 import com.v2ray.ang.dto.EConfigType
@@ -38,8 +39,8 @@ import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MigrateManager
 import com.v2ray.ang.handler.MmkvManager
-import com.v2ray.ang.helper.SimpleItemTouchHelperCallback
 import com.v2ray.ang.handler.V2RayServiceManager
+import com.v2ray.ang.helper.SimpleItemTouchHelperCallback
 import com.v2ray.ang.util.Utils
 import com.v2ray.ang.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +54,7 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
     }
 
     private val adapter by lazy { MainRecyclerAdapter(this) }
+    private val repository by lazy { com.v2ray.ang.data.MikroTikRepository(this) } // Add this line
     private val requestVpnPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if (it.resultCode == RESULT_OK) {
@@ -734,6 +736,26 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
         // Handle navigation view item clicks here.
         when (item.itemId) {
+            R.id.nav_logout -> {
+                binding.drawerLayout.closeDrawers()
+
+                AlertDialog.Builder(this)
+                    .setTitle("خروج از حساب")
+                    .setMessage("آیا اطمینان دارید که می‌خواهید خارج شوید؟")
+                    .setPositiveButton("بله") { _, _ ->
+                        repository.setManualLogout(true)
+                        val intent = Intent(this, PreCheckActivity::class.java)
+                        intent.flags =
+                            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        startActivity(intent)
+                        finish()
+                    }
+                    .setNegativeButton("خیر", null)
+                    .show()
+
+                return true
+            }
+
             R.id.sub_setting -> requestSubSettingActivity.launch(
                 Intent(
                     this,
@@ -798,11 +820,16 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
                 // *** نکته مهم: کامنت‌های // از داخل جیسون حذف شدند ***
 
                 val configString = """
+
             """.trimIndent()
 
                 // چک subscriptionId، اگر null باشد از "" استفاده کنید
                 val subscriptionId = mainViewModel.subscriptionId ?: ""
-                val (count, _) = AngConfigManager.importBatchConfig(configString, subscriptionId, true)
+                val (count, _) = AngConfigManager.importBatchConfig(
+                    configString,
+                    subscriptionId,
+                    true
+                )
                 Log.d("AutoConnect", "Imported $count configs, subscriptionId: $subscriptionId")
 
                 if (count > 0) {

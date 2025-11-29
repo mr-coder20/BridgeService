@@ -2,7 +2,6 @@ package com.v2ray.ang.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.net.Network
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -47,6 +46,9 @@ class MikroTikRepository(private val context: Context) {
     private val PREF_IV_USER = "secure_iv_user"
     private val PREF_IV_PASS = "secure_iv_pass"
     private val PREF_LEGACY_KEY = "secure_legacy_key"
+
+    // *** تغییر جدید: کلید برای وضعیت خروج دستی ***
+    private val PREF_IS_MANUAL_LOGOUT = "pref_is_manual_logout"
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
     private val ANDROID_KEY_STORE = "AndroidKeyStore"
@@ -121,8 +123,6 @@ class MikroTikRepository(private val context: Context) {
 
             for (routerAddress in routerList) {
                 val (host, originalPort) = parseHostAndPort(routerAddress)
-
-                // اگر پورت اصلی کار نکرد، پورت استاندارد 22 را تست کن
                 val portsToTry = if (originalPort != 22) listOf(originalPort, 22) else listOf(22)
 
                 for (port in portsToTry) {
@@ -136,7 +136,7 @@ class MikroTikRepository(private val context: Context) {
                         loginResult = trySshConnectJSch(host, port, user, pass)
 
                         if (loginResult.success || loginResult.message == "Invalid username or password") break
-                        if (loginResult.message.contains("Connection refused")) break // سریع برو پورت بعدی
+                        if (loginResult.message.contains("Connection refused")) break
 
                         if (attempts < 2) Thread.sleep(1000)
                     } while (attempts < 2)
@@ -145,11 +145,9 @@ class MikroTikRepository(private val context: Context) {
                         Log.i("SSHAuth", "Login OK on $host:$port. Secure rotation started...")
 
                         val newPassword = generateStrongPassword()
-
-                        // تغییر پسورد در روتر (Fire & Forget)
                         changePasswordViaSsh(host, port, user, pass, newPassword)
 
-                        // ذخیره امن
+                        // ذخیره امن (این متد حالا وضعیت خروج دستی را هم ریست می‌کند)
                         saveCredentialsSecurely(user, newPassword)
 
                         return@withContext AuthResult(true, "Login Successful")
@@ -196,8 +194,7 @@ class MikroTikRepository(private val context: Context) {
                     channel.inputStream = null
                     channel.connect()
 
-                    Thread.sleep(1500) // زمان انتظار کوتاه برای اجرای دستور
-
+                    Thread.sleep(1500)
                     channel.disconnect()
                     session.disconnect()
                 }
@@ -291,6 +288,10 @@ class MikroTikRepository(private val context: Context) {
                 editor.putString(PREF_IV_USER, Base64.encodeToString(ivUser, Base64.NO_WRAP))
                 editor.putString(PREF_IV_PASS, Base64.encodeToString(ivPass, Base64.NO_WRAP))
             }
+
+            // *** تغییر جدید: چون اطلاعات جدید ذخیره شده (لاگین موفق)، وضعیت خروج دستی را ریست میکنیم ***
+            editor.putBoolean(PREF_IS_MANUAL_LOGOUT, false)
+
             editor.apply()
         } catch (e: Exception) {
             Log.e("MikroTikRepo", "Enc Error")
@@ -336,8 +337,16 @@ class MikroTikRepository(private val context: Context) {
 
     fun clearCredentials() = prefs.edit().clear().apply()
 
-    // --- توابع جدید برای انتقال یوزر (Export/Import) ---
+    // *** تغییر جدید: متدهای مدیریت وضعیت خروج ***
+    fun setManualLogout(isLogout: Boolean) {
+        prefs.edit().putBoolean(PREF_IS_MANUAL_LOGOUT, isLogout).apply()
+    }
 
+    fun isManualLogout(): Boolean {
+        return prefs.getBoolean(PREF_IS_MANUAL_LOGOUT, false)
+    }
+
+    // --- توابع انتقال یوزر (Export/Import) ---
     fun exportTransferToken(): String? {
         val (user, pass) = getSavedCredentials()
         if (user != null && pass != null) {
@@ -351,7 +360,6 @@ class MikroTikRepository(private val context: Context) {
     }
 
     // --------------------------------------------------
-
     private fun parseHostAndPort(rawAddress: String): Pair<String, Int> {
         val clean = rawAddress.trim().replace("/", "").replace("http://", "").replace("https://", "")
         return if (clean.contains(":")) {

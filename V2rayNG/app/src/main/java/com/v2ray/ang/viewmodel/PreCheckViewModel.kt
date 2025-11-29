@@ -1,7 +1,6 @@
 package com.v2ray.ang.viewmodel
 
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -80,7 +79,11 @@ class PreCheckViewModel(application: Application) : AndroidViewModel(application
             repository.getSavedCredentials()
         }
 
-        if (!savedUser.isNullOrEmpty() && !savedPass.isNullOrEmpty()) {
+        // *** تغییر جدید: دریافت وضعیت خروج دستی ***
+        val isManualLogout = repository.isManualLogout()
+
+        // شرط را تغییر دادیم: فقط اگر اطلاعات هست AND کاربر دستی خارج نشده است
+        if (!savedUser.isNullOrEmpty() && !savedPass.isNullOrEmpty() && !isManualLogout) {
             _uiState.value = _uiState.value?.copy(
                 isNetworkCheckInProgress = false,
                 isLoginContainerVisible = false,
@@ -104,7 +107,9 @@ class PreCheckViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         } else {
-            showLoginScreen("Please enter your credentials.")
+            // اگر کاربر دستی خارج شده بود یا دیتایی نبود
+            val message = if (isManualLogout) "Logged out manually." else "Please enter your credentials."
+            showLoginScreen(message)
         }
     }
 
@@ -137,11 +142,16 @@ class PreCheckViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // *** متد کمکی برای خروج (در صورتی که بخواهید از ویو مدل استفاده کنید) ***
+    fun performLogout() {
+        repository.setManualLogout(true)
+        _events.value = Event(PreCheckEvent.NavigateToLogin)
+    }
+
     // ---------------------------------------------------------------------------
     //  بخش انتقال یوزر (Export/Import Logic)
     // ---------------------------------------------------------------------------
 
-    // --- بخش جدید: تولید توکن رمزنگاری شده برای انتقال (مخصوص دکمه Export Code) ---
     fun generateTransferToken() {
         viewModelScope.launch {
             val token = withContext(Dispatchers.IO) {
@@ -156,19 +166,16 @@ class PreCheckViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    // --- بخش جدید: پردازش توکن وارد شده (مخصوص دکمه Enter Code) ---
     fun importTransferToken(token: String) {
         if (token.isBlank()) return
 
         viewModelScope.launch {
-            // دیکد کردن توکن در ترد IO
             val creds = withContext(Dispatchers.IO) {
                 repository.importTransferToken(token)
             }
 
             if (creds != null) {
                 val (user, pass) = creds
-                // انجام لاگین با اطلاعات استخراج شده
                 authenticate(user, pass)
             } else {
                 _events.value = Event(PreCheckEvent.ShowToast("Invalid or corrupted Token!"))
@@ -184,6 +191,7 @@ class PreCheckViewModel(application: Application) : AndroidViewModel(application
         _uiState.value = _uiState.value?.copy(statusMessage = "Credentials cleared.")
     }
 
+    // Permissions Events
     fun onVpnPermissionGranted() {
         _events.value = Event(PreCheckEvent.NavigateToMain)
     }
@@ -215,6 +223,7 @@ sealed class PreCheckEvent {
     object AuthenticationSuccess : PreCheckEvent()
     object RequestVpnPermission : PreCheckEvent()
     object NavigateToMain : PreCheckEvent()
+    object NavigateToLogin : PreCheckEvent() // برای استفاده در خروج
     object ClearFields : PreCheckEvent()
     object CloseApp : PreCheckEvent()
     data class ShowToast(val message: String) : PreCheckEvent()
@@ -223,7 +232,5 @@ sealed class PreCheckEvent {
     // --- ایونت‌های انتقال یوزر ---
     data class ShowCredentialsDialog(val user: String, val pass: String) : PreCheckEvent()
     data class ShowQrCodeDialog(val qrContent: String) : PreCheckEvent()
-
-    // +++ این مورد برای سیستم جدید توکن الزامی است +++
     data class ShowTokenDialog(val token: String) : PreCheckEvent()
 }
