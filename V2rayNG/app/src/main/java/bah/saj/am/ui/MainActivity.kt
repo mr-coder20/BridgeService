@@ -44,10 +44,12 @@ import bah.saj.am.helper.SimpleItemTouchHelperCallback
 import bah.saj.am.util.Utils
 import bah.saj.am.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
+private var connectionMonitorJob: Job? = null
 class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedListener {
     private val binding by lazy {
         ActivityMainBinding.inflate(layoutInflater)
@@ -803,8 +805,11 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
 
     // این تابع را به انتهای کلاس MainActivity اضافه کنید
     // این تابع را در MainActivity.kt پیدا کرده و با کد زیر جایگزین کنید
+    // -------------------------------------------------------
+    // 1. تابع اصلی اتصال هوشمند (تنظیم شده روی یوتیوب)
+    // -------------------------------------------------------
     private fun autoConnectRadiusConfig() {
-        // 1. بررسی مجوز VPN
+        // بررسی مجوز VPN
         val prepare = VpnService.prepare(this)
         if (prepare != null) {
             requestVpnPermission.launch(prepare)
@@ -815,73 +820,244 @@ class MainActivity : BaseActivity(), NavigationView.OnNavigationItemSelectedList
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // توقف سرویس اگر روشن است
+                // خاموش کردن سرویس اگر روشن است
                 if (mainViewModel.isRunning.value == true) {
                     V2RayServiceManager.stopVService(this@MainActivity)
                     delay(1000)
                 }
 
-                // *** نکته مهم: کامنت‌های // از داخل جیسون حذف شدند ***
+                // دریافت و آپدیت کانفیگ‌ها
+                val status = repository.checkInternetConnectivity()
+                if (status.isReachable) {
+                    val newConfigs = repository.getDecryptedConfigs()
+                    Log.d("AutoConnect", "Configs prepared: ${newConfigs.size}")
 
-                val configString = """
+                    if (newConfigs.isNotEmpty()) {
+                        val targetSubId = ""
+                        var totalImported = 0
 
-            """.trimIndent()
+                        for (configContent in newConfigs) {
+                            val (count, _) = AngConfigManager.importBatchConfig(configContent, targetSubId, false)
+                            if (count > 0) totalImported++
+                        }
+                        Log.d("AutoConnect", "Successfully Imported: $totalImported")
 
-                // چک subscriptionId، اگر null باشد از "" استفاده کنید
-                val subscriptionId = mainViewModel.subscriptionId ?: ""
-                val (count, _) = AngConfigManager.importBatchConfig(
-                    configString,
-                    subscriptionId,
-                    true
-                )
-                Log.d("AutoConnect", "Imported $count configs, subscriptionId: $subscriptionId")
+                        if (totalImported > 0) {
+                            withContext(Dispatchers.Main) { mainViewModel.reloadServerList() }
+                            delay(500)
 
-                if (count > 0) {
+                            if (mainViewModel.serversCache.isEmpty()) {
+                                mainViewModel.subscriptionId = ""
+                                withContext(Dispatchers.Main) { mainViewModel.reloadServerList() }
+                                delay(200)
+                            }
+
+                            mainViewModel.removeDuplicateServer()
+                            withContext(Dispatchers.Main) { mainViewModel.reloadServerList() }
+                            delay(200)
+
+                            // نگه داشتن فقط 4 تای آخر
+                            var currentConfigs = mainViewModel.serversCache
+                            if (currentConfigs.size > 4) {
+                                val deleteCount = currentConfigs.size - 4
+                                for (i in 0 until deleteCount) {
+                                    currentConfigs.getOrNull(i)?.let {
+                                        mainViewModel.removeServer(it.guid)
+                                    }
+                                }
+                                withContext(Dispatchers.Main) { mainViewModel.reloadServerList() }
+                            }
+                        }
+                    }
+                }
+
+                // شروع حلقه تست و اتصال
+                val serversToCheck = mainViewModel.serversCache.reversed()
+
+                if (serversToCheck.isEmpty()) {
+                    Log.e("AutoConnect", "No servers found to connect.")
+                    withContext(Dispatchers.Main) { toast("No servers available") }
+                    return@launch
+                }
+
+                var connectedSuccessfully = false
+
+                for ((index, profile) in serversToCheck.withIndex()) {
+                    Log.d("AutoConnect", "Testing server ${index + 1}: GUID=${profile.guid}")
+
                     withContext(Dispatchers.Main) {
-                        mainViewModel.reloadServerList()
+                        toast("Connecting to server ${index + 1}...")
                     }
 
-                    // تاخیر حیاتی برای اطمینان از ذخیره شدن تنظیمات در MMKV
-                    delay(1000)  // افزایش تاخیر
+                    MmkvManager.setSelectServer(profile.guid)
 
-                    // چک serversCache
-                    val serversCache = mainViewModel.serversCache
-                    Log.d("AutoConnect", "serversCache size: ${serversCache.size}")
+                    withContext(Dispatchers.Main) {
+                        V2RayServiceManager.startVService(this@MainActivity)
+                    }
 
-                    if (serversCache.isNotEmpty()) {
-                        val newProfile = serversCache.first()
-                        Log.d("AutoConnect", "Selected profile GUID: ${newProfile.guid}")
+                    // تاخیر برای لود کامل هسته V2Ray
+                    delay(8000)
 
-                        MmkvManager.setSelectServer(newProfile.guid)
+                    // *** تست اتصال فقط با یوتیوب ***
+                    val isWorking = testRealConnection("https://www.youtube.com", 10000)
 
+                    if (isWorking) {
+                        Log.d("AutoConnect", "Connection Successful! (YouTube reachable)")
                         withContext(Dispatchers.Main) {
-                            // استارت سرویس
-                            V2RayServiceManager.startVService(this@MainActivity)
                             toast(R.string.toast_success)
                         }
+                        connectedSuccessfully = true
+
+                        // شروع مانیتورینگ
+                        startConnectionMonitor()
+
+                        break
                     } else {
-                        Log.e("AutoConnect", "serversCache is empty after import")
+                        Log.w("AutoConnect", "Ping Failed (YouTube unreachable). Stopping service...")
                         withContext(Dispatchers.Main) {
-                            toast("No servers available after import")
+                            V2RayServiceManager.stopVService(this@MainActivity)
                         }
+                        delay(1500)
+                    }
+                }
+
+                if (!connectedSuccessfully) {
+                    withContext(Dispatchers.Main) {
+                        toast("Connection failed on all servers.")
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e("AutoConnect", "Critical Error", e)
+                withContext(Dispatchers.Main) { toast("Error: ${e.message}") }
+            } finally {
+                withContext(Dispatchers.Main) { binding.pbWaiting.hide() }
+            }
+        }
+    }
+
+    // -------------------------------------------------------
+    // 2. تابع تست اتصال دقیق با پروکسی (تضمین عبور از تونل)
+    // -------------------------------------------------------
+    // -------------------------------------------------------
+    // 2. تابع تست اتصال اصلاح شده (استفاده از SOCKS روی 10808)
+    // -------------------------------------------------------
+    private fun testRealConnection(urlStr: String, timeout: Int): Boolean {
+        var urlConnection: java.net.HttpURLConnection? = null
+        try {
+            val url = java.net.URL(urlStr)
+
+            // *** تغییر مهم: استفاده از Proxy.Type.SOCKS و پورت 10808 ***
+            // چون کانفیگ‌های فرگمنت اغلب فقط پورت SOCKS (10808) را دارند و HTTP (10809) ندارند.
+            val proxy = java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", 10808))
+
+            urlConnection = url.openConnection(proxy) as java.net.HttpURLConnection
+
+            urlConnection.connectTimeout = timeout
+            urlConnection.readTimeout = timeout
+            urlConnection.useCaches = false
+            urlConnection.instanceFollowRedirects = true
+            urlConnection.requestMethod = "HEAD"
+
+            // هدر User-Agent برای جلوگیری از بلاک شدن توسط گوگل/یوتیوب
+            urlConnection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android 10; Mobile; rv:68.0) Gecko/68.0 Firefox/68.0")
+            urlConnection.setRequestProperty("Connection", "close")
+
+            val responseCode = urlConnection.responseCode
+            Log.d("PingTest", "Response from $urlStr using SOCKS:10808 -> $responseCode")
+
+            // هر کد موفقیتی (200, 204, 302, etc) قبول است
+            return responseCode in 200..399
+
+        } catch (e: Exception) {
+            Log.e("PingTest", "Check Failed on SOCKS:10808: ${e.message}")
+            // اگر SOCKS هم کار نکرد، یک شانس کوچک به HTTP روی 10809 بدهیم (شاید کانفیگ قدیمی باشد)
+            return testRealConnectionFallbackHttp(urlStr, timeout)
+        } finally {
+            urlConnection?.disconnect()
+        }
+    }
+
+    // تابع پشتیبان (اگر SOCKS کار نکرد، HTTP را تست می‌کند)
+    private fun testRealConnectionFallbackHttp(urlStr: String, timeout: Int): Boolean {
+        var urlConnection: java.net.HttpURLConnection? = null
+        try {
+            val url = java.net.URL(urlStr)
+            val proxy = java.net.Proxy(java.net.Proxy.Type.HTTP, java.net.InetSocketAddress("127.0.0.1", 10809))
+            urlConnection = url.openConnection(proxy) as java.net.HttpURLConnection
+            urlConnection.connectTimeout = timeout / 2 // تایم کمتر برای فال‌بک
+            urlConnection.readTimeout = timeout / 2
+            urlConnection.requestMethod = "HEAD"
+            return urlConnection.responseCode in 200..399
+        } catch (e: Exception) {
+            return false
+        } finally {
+            urlConnection?.disconnect()
+        }
+    }
+
+
+    // -------------------------------------------------------
+    // 3. مانیتورینگ اتصال (فقط یوتیوب)
+    // -------------------------------------------------------
+    private fun startConnectionMonitor() {
+        // 1. اطمینان از اینکه مانیتور قبلی کنسل شده است
+        connectionMonitorJob?.cancel()
+
+        // 2. اطمینان از اینکه اکتیویتی زنده است
+        if (isFinishing || isDestroyed) return
+
+        connectionMonitorJob = lifecycleScope.launch(Dispatchers.IO) {
+            Log.d("ConnectionMonitor", "Monitoring started (YouTube only)...")
+
+            while (isActive) {
+                // وقفه 20 ثانیه‌ای (برای کاهش مصرف باتری عدد خوبی است)
+                delay(20000)
+
+                // اگر اکتیویتی در حال بسته شدن است، حلقه را بشکن
+                if (!isActive) break
+
+                // فقط اگر VPN روشن است چک کن
+                if (mainViewModel.isRunning.value == true) {
+                    val isConnected = testRealConnection("https://www.youtube.com", 5000)
+
+                    if (!isConnected) {
+                        Log.w("ConnectionMonitor", "YouTube unreachable! Reconnecting...")
+
+                        // چک کردن اینکه آیا اکتیویتی هنوز وجود دارد که Toast نشان دهد
+                        if (isActive) {
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    toast("اتصال ناپایدار است. تلاش برای یافتن سرور بهتر...")
+                                    V2RayServiceManager.stopVService(this@MainActivity)
+                                } catch (e: Exception) {
+                                    // جلوگیری از کرش اگر اکتیویتی در لحظه بسته شدن باشد
+                                }
+                            }
+                        }
+
+                        delay(3000) // کمی صبر بیشتر برای بسته شدن کامل سرویس
+
+                        if (isActive) {
+                            withContext(Dispatchers.Main) {
+                                autoConnectRadiusConfig()
+                            }
+                        }
+
+                        // خروج از این حلقه (چون autoConnectRadiusConfig خودش مانیتور جدید می‌سازد)
+                        break
+                    } else {
+                        Log.d("ConnectionMonitor", "Connection is stable.")
                     }
                 } else {
-                    Log.e("AutoConnect", "Import failed, count: $count")
-                    withContext(Dispatchers.Main) {
-                        toast("Failed to import config (Json Error)")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("AutoConnect", "Error in autoConnectRadiusConfig", e)
-                withContext(Dispatchers.Main) {
-                    toast("Error: ${e.message}")
-                }
-            } finally {
-                withContext(Dispatchers.Main) {
-                    binding.pbWaiting.hide()
+                    Log.d("ConnectionMonitor", "VPN is OFF. Stopping monitor.")
+                    break
                 }
             }
         }
     }
+
+
+
 
 }

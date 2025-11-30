@@ -1,14 +1,46 @@
-# --- JSch Protection (حیاتی برای SSH) ---
+#proguard
+# ----------------------------------------------------------------------------
+# Security: Log Removal (حذف کامل لاگ‌ها برای امنیت)
+# این بخش تمام دستورات Log.d, Log.e و System.out را از خروجی نهایی حذف می‌کند.
+# ----------------------------------------------------------------------------
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+    public static int w(...);
+    public static int e(...);
+    public static int wtf(...);
+}
+
+-assumenosideeffects class java.io.PrintStream {
+    public void println(...);
+    public void print(...);
+}
+
+# حذف متادیتای نام فایل و شماره خط (برای جلوگیری از مهندسی معکوس دقیق)
+-renamesourcefileattribute SourceFile
+-keepattributes SourceFile,LineNumberTable
+-keepattributes *Annotation*
+-keepattributes Signature
+-keepattributes InnerClasses
+-keepattributes EnclosingMethod
+
+# ----------------------------------------------------------------------------
+# Library Rules (قوانین کتابخانه‌ها)
+# ----------------------------------------------------------------------------
+
+# --- JSch Protection (SSH) ---
 -keep class com.jcraft.jsch.** { *; }
 -keep class com.jcraft.jsch.jce.** { *; }
+-dontwarn com.jcraft.jzlib.**
+-dontwarn org.ietf.jgss.**
 
-# --- Security Classes ---
-# جلوگیری از حذف کلاس‌های رمزنگاری که با String صدا زده می‌شوند
+# --- Crypto & Security ---
 -keep class javax.crypto.** { *; }
 -keep class java.security.** { *; }
 
-# --- Data Models (Gson) ---
-# مدل‌های دیتا که با Gson پارس می‌شوند نباید تغییر نام دهند
+# --- Data Models (Gson - حیاتی برای پارس کردن کانفیگ‌ها) ---
 -keep class bah.saj.am.data.** { *; }
 -keep class bah.saj.am.dto.** { *; }
 
@@ -26,40 +58,44 @@
     volatile <fields>;
 }
 
-# --- MMKV (ذخیره‌سازی) ---
+# --- MMKV (Storage) ---
 -keep class com.tencent.mmkv.** { *; }
 
-# --- Toasty (کتابخانه نمایش پیام) ---
+# --- Toasty ---
 -keep class es.dmoral.toasty.** { *; }
 
-# --- Quickie (QR Code Scanner) ---
+# --- Quickie (QR Scanner) ---
 -keep class com.github.T8RIN.** { *; }
 
 # --- EditorKit & Flexbox ---
 -keep class com.blacksquircle.ui.** { *; }
 -keep class com.google.android.flexbox.** { *; }
 
-# --- Retrofit / OkHttp (اگر استفاده می‌کنید) ---
--keepattributes Signature
--keepattributes *Annotation*
+# --- OkHttp / Retrofit ---
 -keep class okhttp3.** { *; }
 -keep interface okhttp3.** { *; }
 -dontwarn okhttp3.**
+-dontwarn okio.**
 
-# Fix for JSch missing JZlib dependency
--dontwarn com.jcraft.jzlib.**
-
-# Fix for JSch missing Java GSS-API (Kerberos) dependency
--dontwarn org.ietf.jgss.**
+# --- AndroidX & Material ---
+-keep class com.google.android.material.** { *; }
+-keep class androidx.** { *; }
+-dontwarn com.google.android.material.**
+-dontwarn androidx.**
 
 # --- V2RayNG Core Specifics ---
-# اگر کلاس‌های خاصی دارید که نباید obfuscate شوند (مثلاً Interfaceهای JNI)
 -keepclasseswithmembernames class * {
     native <methods>;
 }
 
-# بهینه سازی بیشتر (اختیاری)
+# ----------------------------------------------------------------------------
+# Optimization Settings (تنظیمات بهینه‌سازی)
+# ----------------------------------------------------------------------------
 -optimizationpasses 5
 -dontusemixedcaseclassnames
 -dontskipnonpubliclibraryclasses
 -verbose
+
+-keep class * implements android.os.Parcelable {
+  public static final android.os.Parcelable$Creator *;
+}

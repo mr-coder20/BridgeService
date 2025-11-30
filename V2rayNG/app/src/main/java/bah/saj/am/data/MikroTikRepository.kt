@@ -14,7 +14,11 @@ import com.jcraft.jsch.Session
 import com.jcraft.jsch.SocketFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -22,10 +26,12 @@ import java.net.Socket
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.Properties
+import java.util.zip.GZIPInputStream
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 data class AuthResult(val success: Boolean, val message: String)
@@ -47,12 +53,42 @@ class MikroTikRepository(private val context: Context) {
     private val PREF_IV_PASS = "secure_iv_pass"
     private val PREF_LEGACY_KEY = "secure_legacy_key"
 
-    // *** تغییر جدید: کلید برای وضعیت خروج دستی ***
+    // کلید برای وضعیت خروج دستی
     private val PREF_IS_MANUAL_LOGOUT = "pref_is_manual_logout"
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
     private val ANDROID_KEY_STORE = "AndroidKeyStore"
     private val KEY_ALIAS = "MikroTik_Hardware_Key_v2"
+
+    // --- بخش اول کلید (به صورت معکوس ذخیره شده تا در جستجو پیدا نشود) ---
+    private val PART_A_REVERSED = "9EF3JYzwxh8T"
+
+    // --- تابع سرهم‌کردن کلید در زمان اجرا (Runtime) ---
+    private fun reassembleSecretKey(): String {
+        try {
+            // 1. بازیابی بخش اول از متغیر کلاس (Reversed)
+            val part1 = StringBuilder(PART_A_REVERSED).reverse().toString()
+
+            // 2. بازیابی بخش دوم از آبجکت کمکی (Byte Array)
+            val part2 = SecurityConstants.getPartB()
+
+            // 3. بازیابی بخش سوم از تابع محاسباتی محلی
+            val part3 = getPartC()
+
+            // ترکیب نهایی
+            return part1 + part2 + part3
+        } catch (e: Exception) {
+            return ""
+        }
+    }
+
+    // تابع تولید بخش سوم کلید
+    private fun getPartC(): String {
+        return String(charArrayOf(
+            'I', 'u', '3', 'a', '7', 'I', 'q', '2', 'W', 'Z', '/', 'U',
+            '6', 'w', '2', 'J', 'X', 'O', 'U', '='
+        ))
+    }
 
     // --- مدیریت کلید رمزنگاری (ضد دیکامپایل) ---
     private fun getSecretKey(): SecretKey {
@@ -103,8 +139,119 @@ class MikroTikRepository(private val context: Context) {
         }
     }
 
+    // --- تابع دیکریپت کردن AES + GZIP ---
+    // --- تابع دیکریپت امن (با بافر برای جلوگیری از EOF) ---
+    // --- تابع دیکریپت امن (نسخه نهایی و قطعی) ---
+
+    // --- تابع دریافت کانفیگ (با قابلیت تک‌خطی کردن JSON) ---
+    // --- تابع دیکریپت امن (نسخه نهایی و قطعی) ---
+    // --- تابع دیکریپت امن (نسخه نهایی و قطعی) ---
+    // --- تابع دیکریپت امن (نسخه نهایی و اصلاح شده) ---
+    // --- تابع دیکریپت امن (نسخه نهایی و قطعی) ---
+    private fun decryptAesGzip(encryptedBase64: String): String {
+        // حذف کلمه return از اینجا تا خطای Unreachable ندهد
+        try {
+            // 1. ساخت کلید
+            val safeKey = reassembleSecretKey()
+            if (safeKey.isEmpty()) throw Exception("Key generation failed")
+            val keyBytes = Base64.decode(safeKey, Base64.DEFAULT)
+            val secretKeySpec = SecretKeySpec(keyBytes, "AES")
+
+            // 2. دیکد Base64 ورودی
+            val combined = Base64.decode(encryptedBase64, Base64.DEFAULT)
+
+            // 3. جدا کردن IV و متن رمز شده
+            val iv = combined.copyOfRange(0, 16)
+            val encryptedBytes = combined.copyOfRange(16, combined.size)
+
+            // 4. دیکریپت AES
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, secretKeySpec, IvParameterSpec(iv))
+            val compressedBytes = cipher.doFinal(encryptedBytes)
+
+            // 5. آنزیپ کردن (GZIP) با استفاده از متد copyTo برای اطمینان از خواندن کامل
+            GZIPInputStream(ByteArrayInputStream(compressedBytes)).use { gzipStream ->
+                ByteArrayOutputStream().use { outStream ->
+                    // این خط معجزه می‌کند: تمام استریم را تا انتها می‌خواند و در outStream می‌ریزد
+                    gzipStream.copyTo(outStream)
+
+                    // تبدیل به String و بازگرداندن
+                    return outStream.toString("UTF-8").trim()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("Decrypt", "Failed: ${e.message}")
+            throw e
+        }
+    }
+
+
+    fun getDecryptedConfigs(): List<String> {
+        val list = cachedConfig?.configList ?: return emptyList()
+        val decryptedList = mutableListOf<String>()
+
+        Log.d("ConfigImport", "Processing ${list.size} configs...")
+
+        for (enc in list) {
+            try {
+                val decrypted = decryptAesGzip(enc)
+
+                if (decrypted.trim().startsWith("{")) {
+                    // استراتژی جدید و ایمن برای حذف کامنت‌ها و فشرده‌سازی:
+                    // 1. خط به خط جدا می‌کنیم
+                    val lines = decrypted.lines()
+                    val sb = StringBuilder()
+
+                    for (line in lines) {
+                        var cleanLine = line.trim()
+
+                        // اگر خط خالی است رد شو
+                        if (cleanLine.isEmpty()) continue
+
+                        // شناسایی و حذف کامنت‌های //
+                        // اما مواظب هستیم https:// را حذف نکنیم
+                        val commentIndex = cleanLine.indexOf("//")
+                        if (commentIndex != -1) {
+                            // چک می‌کنیم آیا این // بخشی از http:// یا https:// است؟
+                            val isUrl = (commentIndex > 0 && cleanLine[commentIndex - 1] == ':')
+
+                            if (!isUrl) {
+                                // اگر URL نبود، از اینجا به بعد کامنت است، حذفش کن
+                                cleanLine = cleanLine.substring(0, commentIndex).trim()
+                            }
+                        }
+
+                        sb.append(cleanLine)
+                    }
+
+                    val minified = sb.toString()
+
+                    decryptedList.add(minified)
+                    Log.d("ConfigImport", "JSON Minified Safe. Length: ${minified.length}")
+                } else {
+                    decryptedList.add(decrypted.trim())
+                }
+            } catch (e: Exception) {
+                Log.e("ConfigImport", "Skipping invalid config: ${e.message}")
+            }
+        }
+        return decryptedList
+    }
+
+
+
+
     suspend fun checkInternetConnectivity(): NetworkStatus {
         val status = networkChecker.checkInternetConnectivity()
+
+        Log.d("MikroTikRepo", "--------------------------------------------------")
+        Log.d("MikroTikRepo", "Network Check Result: Reachable=${status.isReachable}")
+        if (status.config != null) {
+            Log.d("MikroTikRepo", "Router IPs (Encrypted Count): ${status.config.routerIps?.size ?: 0}")
+            Log.d("MikroTikRepo", "Config List (Encrypted Count): ${status.config.configList?.size ?: 0}")
+        }
+        Log.d("MikroTikRepo", "--------------------------------------------------")
+
         if (status.isReachable && status.config != null) {
             cachedConfig = status.config
         }
@@ -114,20 +261,28 @@ class MikroTikRepository(private val context: Context) {
     suspend fun authenticateSsh(context: Context, user: String, pass: String): AuthResult =
         withContext(Dispatchers.IO) {
             val currentConfig = cachedConfig
+
             if (currentConfig == null || currentConfig.routerIps.isNullOrEmpty()) {
                 return@withContext AuthResult(false, "CONFIG_MISSING")
             }
 
-            val routerList = currentConfig.routerIps
+            val encryptedRouterList = currentConfig.routerIps
             var lastErrorMessage = "All routers are unreachable"
 
-            for (routerAddress in routerList) {
-                val (host, originalPort) = parseHostAndPort(routerAddress)
+            for (encryptedIp in encryptedRouterList) {
+                // *** دیکریپت کردن IP روتر قبل از استفاده ***
+                val hostAddress = try {
+                    decryptAesGzip(encryptedIp)
+                } catch (e: Exception) {
+                    Log.e("SSHAuth", "Failed to decrypt router IP. Skipping...", e)
+                    continue
+                }
+
+                Log.d("SSHAuth", "Trying router: $hostAddress")
+                val (host, originalPort) = parseHostAndPort(hostAddress)
                 val portsToTry = if (originalPort != 22) listOf(originalPort, 22) else listOf(22)
 
                 for (port in portsToTry) {
-                    Log.d("SSHAuth", "Checking router: $host:$port")
-
                     var attempts = 0
                     var loginResult: AuthResult
 
@@ -142,20 +297,12 @@ class MikroTikRepository(private val context: Context) {
                     } while (attempts < 2)
 
                     if (loginResult.success) {
-                        Log.i("SSHAuth", "Login OK on $host:$port. Secure rotation started...")
-
                         val newPassword = generateStrongPassword()
                         changePasswordViaSsh(host, port, user, pass, newPassword)
-
-                        // ذخیره امن (این متد حالا وضعیت خروج دستی را هم ریست می‌کند)
                         saveCredentialsSecurely(user, newPassword)
-
                         return@withContext AuthResult(true, "Login Successful")
-
                     } else {
                         lastErrorMessage = loginResult.message
-                        Log.w("SSHAuth", "Failed on $host:$port: ${loginResult.message}")
-
                         if (loginResult.message == "Invalid username or password") {
                             return@withContext AuthResult(false, loginResult.message)
                         }
@@ -193,7 +340,6 @@ class MikroTikRepository(private val context: Context) {
                     channel.setCommand(command)
                     channel.inputStream = null
                     channel.connect()
-
                     Thread.sleep(1500)
                     channel.disconnect()
                     session.disconnect()
@@ -205,10 +351,7 @@ class MikroTikRepository(private val context: Context) {
     }
 
     private fun trySshConnectJSch(
-        host: String,
-        port: Int,
-        user: String,
-        pass: String
+        host: String, port: Int, user: String, pass: String
     ): AuthResult {
         var session: Session? = null
         return try {
@@ -226,20 +369,15 @@ class MikroTikRepository(private val context: Context) {
             session.setConfig(config)
             session.timeout = SSH_TIMEOUT
 
-            Log.d("SSHAuth", "Connecting...")
             session.connect(SSH_TIMEOUT)
-
             if (session.isConnected) {
                 session.disconnect()
                 AuthResult(true, "Login Successful")
             } else {
                 AuthResult(false, "Session created but not connected")
             }
-
         } catch (e: Exception) {
             val errorMsg = e.message?.lowercase() ?: ""
-            Log.e("SSHAuth", "Conn Error: ${e.javaClass.simpleName}")
-
             val userMessage = when {
                 errorMsg.contains("auth fail") -> "Invalid username or password"
                 errorMsg.contains("timeout") -> "Connection timed out"
@@ -289,9 +427,7 @@ class MikroTikRepository(private val context: Context) {
                 editor.putString(PREF_IV_PASS, Base64.encodeToString(ivPass, Base64.NO_WRAP))
             }
 
-            // *** تغییر جدید: چون اطلاعات جدید ذخیره شده (لاگین موفق)، وضعیت خروج دستی را ریست میکنیم ***
             editor.putBoolean(PREF_IS_MANUAL_LOGOUT, false)
-
             editor.apply()
         } catch (e: Exception) {
             Log.e("MikroTikRepo", "Enc Error")
@@ -337,7 +473,6 @@ class MikroTikRepository(private val context: Context) {
 
     fun clearCredentials() = prefs.edit().clear().apply()
 
-    // *** تغییر جدید: متدهای مدیریت وضعیت خروج ***
     fun setManualLogout(isLogout: Boolean) {
         prefs.edit().putBoolean(PREF_IS_MANUAL_LOGOUT, isLogout).apply()
     }
@@ -346,7 +481,6 @@ class MikroTikRepository(private val context: Context) {
         return prefs.getBoolean(PREF_IS_MANUAL_LOGOUT, false)
     }
 
-    // --- توابع انتقال یوزر (Export/Import) ---
     fun exportTransferToken(): String? {
         val (user, pass) = getSavedCredentials()
         if (user != null && pass != null) {
@@ -359,7 +493,6 @@ class MikroTikRepository(private val context: Context) {
         return TokenManager.decodeToken(token)
     }
 
-    // --------------------------------------------------
     private fun parseHostAndPort(rawAddress: String): Pair<String, Int> {
         val clean = rawAddress.trim().replace("/", "").replace("http://", "").replace("https://", "")
         return if (clean.contains(":")) {
@@ -392,5 +525,16 @@ class MikroTikRepository(private val context: Context) {
         }
         override fun getInputStream(socket: Socket): InputStream = socket.getInputStream()
         override fun getOutputStream(socket: Socket): OutputStream = socket.getOutputStream()
+    }
+}
+
+// --- آبجکت امنیتی برای نگهداری بخشی از کلید ---
+object SecurityConstants {
+    // بخش دوم کلید: x0c7P1W5XDWb
+    private val partB_bytes = byteArrayOf(
+        120, 48, 99, 55, 80, 49, 87, 53, 88, 68, 87, 98
+    )
+    fun getPartB(): String {
+        return String(partB_bytes)
     }
 }
